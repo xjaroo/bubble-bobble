@@ -34,7 +34,13 @@ export class Bubble extends Entity {
         this.active = false;
     }
 
-    init(x, y, dir, ownerId, speedMul = 1) {
+    init(x, y, dir, ownerId, speedMul = 1, options = null) {
+        const opts = options || {};
+        const kind = typeof opts.kind === 'string' ? opts.kind : 'normal';
+        const lightningFacing = Number.isFinite(opts.lightningRequiredFacing)
+            ? (opts.lightningRequiredFacing >= 0 ? 1 : -1)
+            : 1;
+        const startState = opts.startState === BS_FLOAT ? BS_FLOAT : BS_TRAVEL;
         this.pos.x    = x;
         this.pos.y    = y;
         this.prevPos.x = x;
@@ -43,7 +49,10 @@ export class Bubble extends Entity {
         this.vel.y    = BUBBLE_TRAVEL_LIFT_START;
         this.dir      = dir;          // 1 = right, -1 = left
         this.ownerId  = ownerId;      // player index
-        this.state    = BS_TRAVEL;
+        this.state    = startState;
+        this.kind     = kind;
+        this.lightningRequiredFacing = kind === 'lightning' ? lightningFacing : 0;
+        this.maxLifetime = Number.isFinite(opts.maxLifetime) ? Math.max(30, opts.maxLifetime | 0) : BUBBLE_LIFETIME;
         this.lifetime = 0;
         this.travelTicks = 0;
         this.wobbleT  = Math.random() * Math.PI * 2;
@@ -52,6 +61,10 @@ export class Bubble extends Entity {
         this.pushCrashTimer = 0;
         this.lastPushPlayerId = ownerId;
         this.active   = true;
+        if (this.state === BS_FLOAT) {
+            this.vel.x = 0;
+            this.vel.y = kind === 'lightning' ? 0 : -BUBBLE_FLOAT_SPEED;
+        }
     }
 
     update(game) {
@@ -106,9 +119,10 @@ export class Bubble extends Entity {
         if (this._checkPopByNearbyPoppingBubble(game)) return;
 
         // Try to trap an enemy
-        if (!this.trappedEnemy) {
+        if (!this.trappedEnemy && this.kind === 'normal') {
             for (const enemy of game.enemies) {
                 if (!enemy.active || enemy.trapped) continue;
+                if (enemy.bubbleImmune) continue;
                 if (aabbOverlap(
                     this.pos.x, this.pos.y, this.size.w, this.size.h,
                     enemy.pos.x, enemy.pos.y, enemy.size.w, enemy.size.h
@@ -135,8 +149,13 @@ export class Bubble extends Entity {
     }
 
     _updateFloat(game) {
-        this.wobbleT += BUBBLE_WOBBLE_SPEED;
-        this.vel.x = Math.sin(this.wobbleT) * BUBBLE_WOBBLE_AMP * 0.04;
+        if (this.kind === 'lightning') {
+            this.vel.x = 0;
+            this.vel.y = 0;
+        } else {
+            this.wobbleT += BUBBLE_WOBBLE_SPEED;
+            this.vel.x = Math.sin(this.wobbleT) * BUBBLE_WOBBLE_AMP * 0.04;
+        }
 
         const dx = game.collisionMap.sweepX(this, this.vel.x);
         this.pos.x += dx;
@@ -150,7 +169,7 @@ export class Bubble extends Entity {
         if (hitCeiling || onGround) this.vel.y = 0;
 
         // Auto-pop after lifetime expires
-        if (this.lifetime >= BUBBLE_LIFETIME) {
+        if (this.lifetime >= this.maxLifetime) {
             this.pop(game, false);
             return;
         }
@@ -178,6 +197,7 @@ export class Bubble extends Entity {
     }
 
     _handleHeadHitPop(game) {
+        if (this.kind === 'lightning') return false;
         if (this.state === BS_POPPING) return false;
         const bBottom = this.pos.y + this.size.h;
         for (const player of game.players) {
@@ -208,6 +228,7 @@ export class Bubble extends Entity {
     }
 
     _handleTopContact(game) {
+        if (this.kind === 'lightning') return false;
         if (this.state === BS_POPPING) return false;
         for (const player of game.players) {
             if (!player.active || player.dead) continue;
@@ -245,9 +266,10 @@ export class Bubble extends Entity {
 
     _handlePlayerSideInteraction(game) {
         if (this.state === BS_POPPING) return false;
+        const isLightning = this.kind === 'lightning';
         for (const player of game.players) {
             if (!player.active || player.dead) continue;
-            if (player.id !== this.ownerId) continue;
+            if (!isLightning && player.id !== this.ownerId) continue;
 
             const px = player.pos.x;
             const py = player.pos.y + 1;
@@ -267,11 +289,12 @@ export class Bubble extends Entity {
                 const faceHit = aabbOverlap(px + pw - sideW, py, sideW, ph, bubbleX, bubbleY, bubbleW, bubbleH);
                 // Tail (left/back) hits -> pop
                 if (tailHit && !inFront) {
+                    if (isLightning && player.facing !== this.lightningRequiredFacing) continue;
                     this.pop(game, true, player.id);
                     return true;
                 }
                 // Face (right/front) hits -> push
-                if (faceHit && inFront) {
+                if (!isLightning && faceHit && inFront) {
                     this._pushFromFace(1, player.id);
                     return false;
                 }
@@ -281,11 +304,12 @@ export class Bubble extends Entity {
                 const faceHit = aabbOverlap(px, py, sideW, ph, bubbleX, bubbleY, bubbleW, bubbleH);
                 // Tail (right/back) hits -> pop
                 if (tailHit && !inFront) {
+                    if (isLightning && player.facing !== this.lightningRequiredFacing) continue;
                     this.pop(game, true, player.id);
                     return true;
                 }
                 // Face (left/front) hits -> push
-                if (faceHit && inFront) {
+                if (!isLightning && faceHit && inFront) {
                     this._pushFromFace(-1, player.id);
                     return false;
                 }
@@ -308,6 +332,7 @@ export class Bubble extends Entity {
 
     _checkPopByNearbyPoppingBubble(game) {
         if (this.state === BS_POPPING) return false;
+        if (this.kind === 'lightning') return false;
         const cx = this.pos.x + this.size.w * 0.5;
         const cy = this.pos.y + this.size.h * 0.5;
         for (const other of game.bubbles) {
@@ -385,6 +410,14 @@ export class Bubble extends Entity {
         this.state    = BS_POPPING;
         this.popTimer = 0;
         game.sound.play('pop');
+
+        if (this.kind === 'lightning') {
+            if (byPlayer && typeof game.onLightningBubbleBurst === 'function') {
+                game.onLightningBubbleBurst(playerId, this.lightningRequiredFacing);
+            }
+            this.trappedEnemy = null;
+            return;
+        }
 
         if (byPlayer && this.trappedEnemy) {
             // Score + item drop

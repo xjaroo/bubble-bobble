@@ -180,6 +180,9 @@ function wsTryStartMatch(room) {
   }
   wsSend(room.host, payload)
   wsSend(room.guest, payload)
+  // Keep lobby snapshots in sync with runtime flags so clients can
+  // immediately enable input forwarding after match-start.
+  wsBroadcastLobbyState(room)
 }
 
 function wsLeaveRoom(ws, notify = true) {

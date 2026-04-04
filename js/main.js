@@ -268,7 +268,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             updateNetUi();
         },
         onGuestInput: raw => {
-            if (!netLobbyState || !netLobbyState.matchActive) return;
+            if (!netSession.isHost()) return;
             const state = normalizeRemoteInputState(raw);
             if (input.setRemotePlayerState) input.setRemotePlayerState(1, state);
         },
@@ -326,7 +326,19 @@ window.addEventListener('DOMContentLoaded', async () => {
             updateNetUi();
             updateControls();
         },
-        onMatchStart: () => {
+        onMatchStart: (msg) => {
+            const hostName = sanitizePlayerName(msg && msg.players && msg.players.host ? msg.players.host : 'HOST');
+            const guestName = sanitizePlayerName(msg && msg.players && msg.players.guest ? msg.players.guest : 'GUEST');
+            netLobbyState = {
+                ...(netLobbyState || {}),
+                roomCode: (msg && msg.roomCode) ? String(msg.roomCode) : (netSession.roomCode() || ''),
+                matchActive: true,
+                players: {
+                    host: { connected: true, name: hostName, ready: true },
+                    guest: { connected: true, name: guestName, ready: true },
+                },
+            };
+            netReadyState = true;
             if (netSession.isHost() && typeof game.startOnlineMatch === 'function') {
                 game.startOnlineMatch();
             }
@@ -633,15 +645,34 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (!scoreTopList) return;
         scoreTopList.innerHTML = '';
         const list = Array.isArray(scores) ? scores : [];
+
+        const header = document.createElement('li');
+        header.className = 'score-top-row score-top-head';
+        header.innerHTML = [
+            '<span class="score-top-rank">#</span>',
+            '<span class="score-top-name">NAME</span>',
+            '<span class="score-top-score">SCORE</span>',
+        ].join('');
+        scoreTopList.appendChild(header);
+
         if (list.length === 0) {
             const li = document.createElement('li');
-            li.textContent = 'No scores yet';
+            li.className = 'score-top-row score-top-empty';
+            li.innerHTML = '<span class="score-top-empty-text">No scores yet</span>';
             scoreTopList.appendChild(li);
             return;
         }
-        for (const s of list.slice(0, 10)) {
+
+        for (const [idx, s] of list.slice(0, 10).entries()) {
             const li = document.createElement('li');
-            li.textContent = `${String(s.name || 'PLAYER').toUpperCase()} - ${formatScore(s.score || 0)}`;
+            li.className = 'score-top-row';
+            const name = String(s.name || 'PLAYER').toUpperCase().slice(0, 16);
+            const score = formatScore(s.score || 0);
+            li.innerHTML = [
+                `<span class="score-top-rank">${idx + 1}</span>`,
+                `<span class="score-top-name">${name}</span>`,
+                `<span class="score-top-score">${score}</span>`,
+            ].join('');
             scoreTopList.appendChild(li);
         }
     };
@@ -1136,7 +1167,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         if (netSession.isGuest()) {
             if (input.beginFrame) input.beginFrame();
-            const canSendInput = !!(netLobbyState && netLobbyState.matchActive);
+            const canSendInput = !!(
+                netSession.isGuest() &&
+                (game.scene === 'PLAYING' || (netLobbyState && netLobbyState.matchActive))
+            );
             if (canSendInput) {
                 const packet = buildGuestInputPacket();
                 const encoded = JSON.stringify(packet);

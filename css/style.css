@@ -417,12 +417,67 @@ canvas {
 }
 
 #score-top-list {
-    list-style: decimal;
-    margin-left: 20px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: grid;
-    gap: 4px;
+    gap: 3px;
     color: #d9eaff;
-    font-size: 13px;
+    font-size: 12px;
+}
+
+#score-top-list .score-top-row {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 17px;
+    padding: 1px 4px;
+    border-radius: 4px;
+}
+
+#score-top-list .score-top-head {
+    color: #8fb5e2;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid rgba(110, 170, 235, 0.35);
+    border-radius: 0;
+    padding-bottom: 3px;
+    margin-bottom: 2px;
+}
+
+#score-top-list .score-top-row:not(.score-top-head):not(.score-top-empty):nth-child(even) {
+    background: rgba(120, 170, 240, 0.08);
+}
+
+#score-top-list .score-top-rank {
+    text-align: right;
+    color: #9ec4f1;
+    font-variant-numeric: tabular-nums;
+}
+
+#score-top-list .score-top-name {
+    color: #e4f1ff;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+#score-top-list .score-top-score {
+    color: #ffe58f;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.3px;
+}
+
+#score-top-list .score-top-empty {
+    grid-template-columns: 1fr;
+    padding: 6px 4px;
+}
+
+#score-top-list .score-top-empty-text {
+    color: #95b8e5;
+    text-align: center;
 }
 
 #settings-modal h2 {

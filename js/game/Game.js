@@ -2,7 +2,7 @@ import {
     TILE_SIZE, PLAY_W, PLAY_H,
     SCENE_TITLE, SCENE_PLAYING, SCENE_TRANSITION, SCENE_GAMEOVER,
     HURRY_FRAC, ANGRY_FRAC, BARON_FRAC,
-    SCORE_COMBO, ITEM_CANDY, ITEM_EXTEND, ITEM_RING, ITEM_GEM, ITEM_SHOE, ITEM_POTION, ITEM_UMBRELLA, ITEM_CAKE,
+    SCORE_COMBO, ITEM_CANDY, ITEM_EXTEND, ITEM_RING, ITEM_GEM, ITEM_SHOE, ITEM_POTION, ITEM_UMBRELLA, ITEM_CAKE, ITEM_RAINBOW,
     EXTRA_LIFE_SCORES,
 } from '../constants.js';
 import { CollisionMap } from './CollisionMap.js';
@@ -14,6 +14,7 @@ import { Projectile }   from '../entities/Projectile.js';
 import { ZenChan }      from '../entities/enemies/ZenChan.js';
 import { Mighta }       from '../entities/enemies/Mighta.js';
 import { Monsta }       from '../entities/enemies/Monsta.js';
+import { DragonKing }   from '../entities/enemies/DragonKing.js';
 import { BaronVonBlubba } from '../entities/BaronVonBlubba.js';
 import { Renderer }     from '../rendering/Renderer.js';
 import { LEVELS }       from '../data/levels.js';
@@ -38,7 +39,22 @@ const RANDOM_GEM_CHANCE = 0.18;        // chance random drop is gem instead of c
 const RANDOM_GIANT_CAKE_MIN_TICKS = 900;   // 15s
 const RANDOM_GIANT_CAKE_MAX_TICKS = 2100;  // 35s
 const RANDOM_GIANT_CAKE_ITEM_TICKS = 480;  // 8s to pick
+const RANDOM_RAINBOW_ICON_MIN_TICKS = 720;  // 12s
+const RANDOM_RAINBOW_ICON_MAX_TICKS = 1680; // 28s
+const RANDOM_RAINBOW_ICON_TICKS = 480;      // 8s to pick
+const RAINBOW_RUSH_ITEM_TICKS = 3000;       // ~50s to clear full rainbow rush
 const ENEMY_BURST_WINDOW_TICKS = 48;   // kills within this window count as one burst
+const MAX_STAGE_ROUNDS = 100;
+const LEVEL_START_PLAYER_INVINCIBLE_TICKS = 180;
+const ENEMY_TOP_DROP_MIN = 20;
+const ENEMY_TOP_DROP_MAX = 84;
+const ENEMY_SPAWN_GRACE_TICKS = 150;
+const ENEMY_START_SAFE_RADIUS = 56;
+const ENEMY_START_SAFE_SHIFT = 70;
+const EXTEND_RAINBOW_TICKS = 300;
+const BOSS_STAGE_NUMBER = 100;
+const BOSS_TIMER_LIMIT = 100000;
+const BOSS_LIGHTNING_BUBBLE_LIFETIME = 240;
 const DEFAULT_LEVEL_DIFFICULTY = Object.freeze({
     enemySpeedMul: 1.0,
     enemyAngrySpeedMul: 2.0,
@@ -99,6 +115,7 @@ export class Game {
         this._nextLifeIdx = [0, 0];
         this.extendCollected = new Set();
         this.extendNextIdx   = 0;
+        this.extendRainbowTimer = 0;
 
         this.players     = [];
         this.bubbles     = [];
@@ -127,12 +144,21 @@ export class Game {
 
         this.levelEnemyTotal = 0;
         this.levelKillCount  = 0;
+        this.isBossStage = false;
+        this.bossEnemy = null;
+        this.gameClear = false;
         this.levelDifficulty = { ...DEFAULT_LEVEL_DIFFICULTY };
         this.giantCakeDropped = false;
         this.umbrellaSpawnTimer = 0;
         this.umbrellaSpawned = false;
         this.candySpawnTimer = 0;
         this.randomCakeSpawnTimer = 0;
+        this.rainbowIconSpawnTimer = 0;
+        this.rainbowRushActive = false;
+        this.rainbowRushTotal = 0;
+        this.rainbowRushCollected = [0, 0];
+        this.rainbowRushResultTimer = 0;
+        this.rainbowRushWinner = '';
         this.enemyBurstKills = 0;
         this.enemyBurstExpireAt = -1;
         this.enemyBurstOwner = 0;
@@ -168,7 +194,10 @@ export class Game {
     }
 
     _loadLevel(index) {
-        const data = LEVELS[index % LEVELS.length];
+        const round = this._roundNumber(index);
+        const sourceData = LEVELS[index % LEVELS.length];
+        this.isBossStage = round === BOSS_STAGE_NUMBER;
+        const data = this.isBossStage ? this._buildBossLevelData(sourceData) : sourceData;
         this.level = new Level(data);
         this.collisionMap.setLevel(this.level);
 
@@ -186,35 +215,60 @@ export class Game {
         this.transitionStyle = 'normal';
         this.transitionStartRound = 1;
         this.transitionRouteRounds = [];
+        this.bossEnemy = null;
+        this.gameClear = false;
         this.levelDifficulty = this._buildLevelDifficulty(index);
 
         const maxEnemies = this.levelDifficulty.maxEnemies || data.enemies.length;
-        const spawns = data.enemies.slice(0, Math.max(1, maxEnemies));
-        this.levelEnemyTotal = spawns.length;
+        const spawns = this.isBossStage
+            ? []
+            : data.enemies.slice(0, Math.max(1, maxEnemies));
+        this.levelEnemyTotal = this.isBossStage ? 1 : spawns.length;
         this.levelKillCount = 0;
         this.giantCakeDropped = false;
         this.umbrellaSpawned = false;
         this.umbrellaSpawnTimer = randInt(UMBRELLA_SPAWN_MIN_TICKS, UMBRELLA_SPAWN_MAX_TICKS);
         this.candySpawnTimer = randInt(RANDOM_CANDY_MIN_TICKS, RANDOM_CANDY_MAX_TICKS);
         this.randomCakeSpawnTimer = randInt(RANDOM_GIANT_CAKE_MIN_TICKS, RANDOM_GIANT_CAKE_MAX_TICKS);
+        this.rainbowIconSpawnTimer = randInt(RANDOM_RAINBOW_ICON_MIN_TICKS, RANDOM_RAINBOW_ICON_MAX_TICKS);
+        this.rainbowRushActive = false;
+        this.rainbowRushTotal = 0;
+        this.rainbowRushCollected = [0, 0];
+        this.rainbowRushResultTimer = 0;
+        this.rainbowRushWinner = '';
         this.enemyBurstKills = 0;
         this.enemyBurstExpireAt = -1;
         this.enemyBurstOwner = 0;
 
-        // Spawn enemies
-        for (const spawnData of spawns) {
-            this._spawnEnemy(spawnData, this.levelDifficulty);
+        const p1Data = data.p1Start;
+        const p2Data = data.p2Start;
+        const playerSpawnXs = [p1Data.col * TILE_SIZE];
+        if (this.twoPlayer) playerSpawnXs.push(p2Data.col * TILE_SIZE);
+
+        if (!this.isBossStage) {
+            // Keep early rounds immediately readable/easy: spawn enemies on-map.
+            // Later rounds still use top-drop entrances.
+            const introTopDrop = round > 3;
+            // Spawn enemies from above to prevent immediate start collisions.
+            for (const spawnData of spawns) {
+                this._spawnEnemy(spawnData, this.levelDifficulty, {
+                    topDrop: introTopDrop,
+                    avoidXs: playerSpawnXs,
+                });
+            }
         }
 
         // Place/respawn players
-        const p1Data = data.p1Start;
-        const p2Data = data.p2Start;
         if (this.players.length === 0) {
-            this.players.push(new Player(0,
-                p1Data.col * TILE_SIZE, (p1Data.row - 1) * TILE_SIZE));
+            const p1 = new Player(0,
+                p1Data.col * TILE_SIZE, (p1Data.row - 1) * TILE_SIZE);
+            p1.invincible = LEVEL_START_PLAYER_INVINCIBLE_TICKS;
+            this.players.push(p1);
             if (this.twoPlayer) {
-                this.players.push(new Player(1,
-                    p2Data.col * TILE_SIZE, (p2Data.row - 1) * TILE_SIZE));
+                const p2 = new Player(1,
+                    p2Data.col * TILE_SIZE, (p2Data.row - 1) * TILE_SIZE);
+                p2.invincible = LEVEL_START_PLAYER_INVINCIBLE_TICKS;
+                this.players.push(p2);
             }
         } else {
             for (const p of this.players) {
@@ -226,15 +280,82 @@ export class Game {
                 p.vel.x     = 0;
                 p.vel.y     = 0;
                 p.dead      = false;
-                p.invincible = 120;
+                p.invincible = LEVEL_START_PLAYER_INVINCIBLE_TICKS;
                 p.onGround  = false;
             }
         }
+
+        if (this.isBossStage) {
+            this._spawnBoss();
+        }
     }
 
-    _spawnEnemy(data, difficulty = DEFAULT_LEVEL_DIFFICULTY) {
-        const x = data.col * TILE_SIZE;
-        const y = (data.row - 1) * TILE_SIZE;
+    _buildBossLevelData(baseData) {
+        const rows = [];
+        for (let r = 0; r < 25; r++) {
+            if (r === 0 || r === 24) {
+                rows.push('#'.repeat(32));
+            } else {
+                const arr = ['#', ...Array(30).fill('.'), '#'];
+                rows.push(arr.join(''));
+            }
+        }
+        const paintPlatform = (row, startCol, len) => {
+            const chars = rows[row].split('');
+            for (let i = 0; i < len; i++) {
+                const col = startCol + i;
+                if (col > 0 && col < 31) chars[col] = '-';
+            }
+            rows[row] = chars.join('');
+        };
+
+        paintPlatform(14, 8, 16);
+        paintPlatform(19, 10, 12);
+
+        return {
+            id: 100,
+            bgColor: '#12041e',
+            timerLimit: BOSS_TIMER_LIMIT,
+            map: rows,
+            enemies: [],
+            p1Start: baseData?.p1Start || { col: 5, row: 22 },
+            p2Start: baseData?.p2Start || { col: 25, row: 22 },
+        };
+    }
+
+    _spawnBoss() {
+        const bossX = Math.round(PLAY_W * 0.5 - 17);
+        const bossY = -36;
+        const boss = new DragonKing(bossX, bossY);
+        this.levelEnemyTotal = 1;
+        this.bossEnemy = boss;
+        this.enemies.push(boss);
+    }
+
+    _safeEnemySpawnX(x, avoidXs = []) {
+        let safeX = x;
+        for (const px of avoidXs) {
+            if (!Number.isFinite(px)) continue;
+            if (Math.abs(safeX - px) < ENEMY_START_SAFE_RADIUS) {
+                const dir = safeX <= px ? -1 : 1;
+                safeX = px + dir * ENEMY_START_SAFE_SHIFT;
+            }
+        }
+        const minX = TILE_SIZE * 2;
+        const maxX = PLAY_W - TILE_SIZE * 3;
+        if (safeX < minX) safeX = minX;
+        if (safeX > maxX) safeX = maxX;
+        return safeX;
+    }
+
+    _spawnEnemy(data, difficulty = DEFAULT_LEVEL_DIFFICULTY, options = null) {
+        const opts = options || {};
+        const avoidXs = Array.isArray(opts.avoidXs) ? opts.avoidXs : [];
+        const topDrop = !!opts.topDrop;
+        const x = this._safeEnemySpawnX(data.col * TILE_SIZE, avoidXs);
+        const y = topDrop
+            ? -randInt(ENEMY_TOP_DROP_MIN, ENEMY_TOP_DROP_MAX)
+            : (data.row - 1) * TILE_SIZE;
         let e;
         switch (data.type) {
             case 'ZenChan': e = new ZenChan(x, y); break;
@@ -243,6 +364,13 @@ export class Game {
             default:        e = new ZenChan(x, y);
         }
         this._applyEnemyDifficulty(e, difficulty);
+        if (topDrop) {
+            e.introDrop = true;
+            e.spawnGrace = ENEMY_SPAWN_GRACE_TICKS;
+            e.vel.x = 0;
+            e.vel.y = 0;
+            e.onGround = false;
+        }
         this.enemies.push(e);
     }
 
@@ -264,9 +392,7 @@ export class Game {
     }
 
     _buildLevelDifficulty(levelIndex) {
-        // Use absolute progression (1,2,3,...) so each next stage gets harder
-        // even after the map list loops.
-        const round = Math.max(1, levelIndex + 1);
+        const round = this._roundNumber(levelIndex);
         const d = { ...DEFAULT_LEVEL_DIFFICULTY };
 
         // Very easy early game, then smooth ramp up by stage.
@@ -351,7 +477,7 @@ export class Game {
             d.baronFrac = 0.96;
             d.maxEnemies = 0;
         } else {
-            // Endless progression: continue ramping difficulty gradually.
+            // Stage 21..100: gradually increase to late-game difficulty.
             const extra = round - 20;
             d.enemySpeedMul = Math.min(1.22, 1.04 + extra * 0.012);
             d.enemyAngrySpeedMul = Math.min(2.35, 2.10 + extra * 0.015);
@@ -368,11 +494,11 @@ export class Game {
 
     // ── Public spawners (called by entities) ─────────────────────────────────
 
-    spawnBubble(x, y, dir, ownerId, speedMul = 1) {
+    spawnBubble(x, y, dir, ownerId, speedMul = 1, options = null) {
         // Reuse inactive bubble or create new one
         let b = this.bubbles.find(b => !b.active);
         if (!b) { b = new Bubble(); this.bubbles.push(b); }
-        b.init(x, y, dir, ownerId, speedMul);
+        b.init(x, y, dir, ownerId, speedMul, options);
     }
 
     spawnProjectile(x, y, dir) {
@@ -385,6 +511,149 @@ export class Game {
         let item = this.items.find(i => !i.active);
         if (!item) { item = new Item(); this.items.push(item); }
         item.init(x, y, type, extendIndex, lifetimeLimit, foodKind);
+    }
+
+    _hasActiveItemType(type, foodKind = null) {
+        return this.items.some(i => i.active && i.type === type && (foodKind === null || i.foodKind === foodKind));
+    }
+
+    _spawnRandomRainbowIcon() {
+        if (this.scene !== SCENE_PLAYING) return;
+        if (this.levelClearing || this.isBossStage) return;
+        if (this.rainbowRushActive) return;
+        if (this._hasActiveItemType(ITEM_RAINBOW)) return;
+        const x = randInt(18, PLAY_W - 18);
+        const y = randInt(-14, 40);
+        this.spawnItem(x, y, ITEM_RAINBOW, 0, RANDOM_RAINBOW_ICON_TICKS);
+    }
+
+    _spawnRainbowRushItems() {
+        const points = [];
+        const rows = this.level?.rows || 25;
+        const cols = this.level?.cols || 32;
+        for (let r = 1; r < rows - 1; r++) {
+            for (let c = 1; c < cols - 1; c++) {
+                const blocked = this.collisionMap.isSolid(c, r) || this.collisionMap.isPlatform(c, r);
+                if (blocked) continue;
+                const support = this.collisionMap.isSolid(c, r + 1) || this.collisionMap.isPlatform(c, r + 1);
+                if (!support) continue;
+                points.push({
+                    x: c * TILE_SIZE + TILE_SIZE * 0.5,
+                    y: r * TILE_SIZE - 10,
+                });
+            }
+        }
+
+        // Clear existing map items so empty lanes are filled with rainbow collectibles.
+        for (const item of this.items) item.active = false;
+
+        let spawned = 0;
+        for (const p of points) {
+            this.spawnItem(p.x, p.y, ITEM_CANDY, 0, RAINBOW_RUSH_ITEM_TICKS, 'rainbow');
+            spawned++;
+        }
+        return spawned;
+    }
+
+    onRainbowIconCollected(playerId = 0) {
+        if (this.scene !== SCENE_PLAYING) return;
+        if (this.levelClearing || this.isBossStage) return;
+        this.rainbowRushCollected = [0, 0];
+        this.rainbowRushWinner = '';
+        this.rainbowRushResultTimer = 0;
+        this.rainbowRushTotal = this._spawnRainbowRushItems();
+        this.rainbowRushActive = this.rainbowRushTotal > 0;
+        this.rainbowIconSpawnTimer = randInt(RANDOM_RAINBOW_ICON_MIN_TICKS, RANDOM_RAINBOW_ICON_MAX_TICKS);
+        if (this.rainbowRushActive) {
+            this.sound.play('item');
+            this.scorePopups.push(new ScorePopup(
+                PLAY_W * 0.5,
+                24,
+                this.rainbowRushTotal * 100
+            ));
+        }
+    }
+
+    onRainbowFoodCollected(playerId = 0) {
+        if (!this.rainbowRushActive || this.rainbowRushTotal <= 0) return;
+        const pid = Math.max(0, Math.min(1, playerId | 0));
+        this.rainbowRushCollected[pid] = (this.rainbowRushCollected[pid] || 0) + 1;
+        const eaten = (this.rainbowRushCollected[0] || 0) + (this.rainbowRushCollected[1] || 0);
+        if (eaten >= this.rainbowRushTotal) {
+            this._completeRainbowRush();
+        }
+    }
+
+    _completeRainbowRush() {
+        if (!this.rainbowRushActive) return;
+        this.rainbowRushActive = false;
+        this.rainbowRushResultTimer = 360;
+        const p1 = this.rainbowRushCollected[0] || 0;
+        const p2 = this.rainbowRushCollected[1] || 0;
+        if (this.twoPlayer) {
+            if (p1 > p2) this.rainbowRushWinner = 'RAINBOW WINNER P1';
+            else if (p2 > p1) this.rainbowRushWinner = 'RAINBOW WINNER P2';
+            else this.rainbowRushWinner = 'RAINBOW RESULT DRAW';
+        } else {
+            this.rainbowRushWinner = `RAINBOW EATEN ${p1}`;
+        }
+        this.sound.play('levelclear');
+    }
+
+    spawnBossLightningBubble(x, y, requiredFacing = 1) {
+        if (!this.isBossStage) return;
+        if (!this.bossEnemy || this.bossEnemy.dead) return;
+        const facing = requiredFacing >= 0 ? 1 : -1;
+        this.spawnBubble(x, y, 0, -1, 1, {
+            kind: 'lightning',
+            lightningRequiredFacing: facing,
+            maxLifetime: BOSS_LIGHTNING_BUBBLE_LIFETIME,
+            startState: 'float',
+        });
+    }
+
+    onLightningBubbleBurst(playerId = 0, facing = 1) {
+        if (!this.isBossStage) return false;
+        const boss = this.bossEnemy;
+        if (!boss || boss.dead) return false;
+        const hitterFacing = facing >= 0 ? 1 : -1;
+        if (typeof boss.takeLightningHit === 'function') {
+            const hit = boss.takeLightningHit(1, this, playerId, hitterFacing);
+            if (hit) {
+                this.scorePopups.push(new ScorePopup(
+                    boss.pos.x + boss.size.w * 0.5,
+                    boss.pos.y + boss.size.h * 0.3,
+                    1400
+                ));
+            }
+            return hit;
+        }
+        return false;
+    }
+
+    onBossDefeated(playerId = 0) {
+        if (this.gameClear) return;
+        this.gameClear = true;
+        this.isBossStage = false;
+        if (this.baron) {
+            this.baron.active = false;
+            this.baron = null;
+        }
+        for (const e of this.enemies) {
+            e.active = false;
+            e.trapped = false;
+            e.dead = true;
+        }
+        this.bossEnemy = null;
+        this.levelKillCount = this.levelEnemyTotal;
+        this.addScore(playerId, 100000);
+        this.sound.play('levelclear');
+        this.sound.play('celebrate');
+        this.scene = SCENE_GAMEOVER;
+        this.gameOverTimer = GAMEOVER_TICKS + 180;
+        this.gameOverFinalScore = Math.max(...this.scores, 0);
+        this.gameOverNeedsNameEntry = this.gameOverFinalScore > 0;
+        this.gameOverEntryRequested = false;
     }
 
     // ── Scoring / EXTEND ─────────────────────────────────────────────────────
@@ -414,6 +683,10 @@ export class Game {
 
     onEnemyKilled(enemy, x, y, playerId) {
         if (!enemy || enemy.dead) return;
+        if (enemy.kind === 'DragonKing') {
+            this.onBossDefeated(playerId);
+            return;
+        }
         // Mark fully dead so filters + level-clear check exclude it
         enemy.active = false;
         enemy.trapped = false;
@@ -500,6 +773,7 @@ export class Game {
 
     onUmbrellaCollected(playerId = 0) {
         if (this.scene !== SCENE_PLAYING) return;
+        if (this.isBossStage) return;
         const skip = randInt(UMBRELLA_SKIP_MIN, UMBRELLA_SKIP_MAX);
         this._startTransition(skip);
     }
@@ -574,7 +848,9 @@ export class Game {
         if (this.extendCollected.size >= 6) {
             this.extendCollected.clear();
             this.lives[playerId]++;
+            this.extendRainbowTimer = EXTEND_RAINBOW_TICKS;
             this.sound.play('extralife');
+            this.sound.play('celebrate');
         }
     }
 
@@ -624,6 +900,9 @@ export class Game {
         if (this.remoteMirror) return;
         // Poll non-event inputs (gamepads) at frame start.
         if (this.input.beginFrame) this.input.beginFrame();
+        if (this.scene !== SCENE_TITLE && this.extendRainbowTimer > 0) {
+            this.extendRainbowTimer--;
+        }
 
         // Flush input at the end of each tick
         switch (this.scene) {
@@ -677,6 +956,7 @@ export class Game {
         const angryFrac = this.levelDifficulty?.angryFrac ?? ANGRY_FRAC;
         const baronFrac = this.levelDifficulty?.baronFrac ?? BARON_FRAC;
         this.levelTimer++;
+        this._ensureEnemiesPresentEarly();
 
         if (this.levelTimer >= limitTicks * hurryFrac && !this.hurryUp) {
             this.hurryUp = true;
@@ -684,18 +964,20 @@ export class Game {
         }
         if (this.hurryUp) this.hurryUpTimer++;
         if (this.bubbleFoodRushTimer > 0) this.bubbleFoodRushTimer--;
-        if (!this.umbrellaSpawned && !this.levelClearing) {
+        if (this.rainbowRushResultTimer > 0) this.rainbowRushResultTimer--;
+        if (!this.isBossStage && !this.umbrellaSpawned && !this.levelClearing) {
             this.umbrellaSpawnTimer--;
             if (this.umbrellaSpawnTimer <= 0) this._spawnRandomUmbrella();
         }
-        if (!this.levelClearing && this.enemies.length > 0 && this.bubbleFoodRushTimer <= 0) {
+        if (!this.isBossStage && !this.levelClearing && !this.rainbowRushActive &&
+            this.enemies.length > 0 && this.bubbleFoodRushTimer <= 0) {
             this.candySpawnTimer--;
             if (this.candySpawnTimer <= 0) {
                 this._spawnRandomCandy();
                 this.candySpawnTimer = randInt(RANDOM_CANDY_MIN_TICKS, RANDOM_CANDY_MAX_TICKS);
             }
         }
-        if (!this.levelClearing && this.enemies.length > 0) {
+        if (!this.isBossStage && !this.levelClearing && !this.rainbowRushActive && this.enemies.length > 0) {
             this.randomCakeSpawnTimer--;
             if (this.randomCakeSpawnTimer <= 0) {
                 // "Sometimes" event: mostly spawn, but not every interval.
@@ -703,12 +985,24 @@ export class Game {
                 this.randomCakeSpawnTimer = randInt(RANDOM_GIANT_CAKE_MIN_TICKS, RANDOM_GIANT_CAKE_MAX_TICKS);
             }
         }
+        if (!this.isBossStage && !this.levelClearing && !this.rainbowRushActive && this.enemies.length > 0) {
+            this.rainbowIconSpawnTimer--;
+            if (this.rainbowIconSpawnTimer <= 0) {
+                this._spawnRandomRainbowIcon();
+                this.rainbowIconSpawnTimer = randInt(RANDOM_RAINBOW_ICON_MIN_TICKS, RANDOM_RAINBOW_ICON_MAX_TICKS);
+            }
+        }
 
         if (this.levelTimer >= limitTicks * angryFrac) {
             for (const e of this.enemies) e.setAngry();
         }
         const hasLivingEnemies = this.enemies.some(e => !e.dead && (e.active || e.trapped));
-        if (!hasLivingEnemies) {
+        if (this.isBossStage) {
+            if (this.baron) {
+                this.baron.active = false;
+                this.baron = null;
+            }
+        } else if (!hasLivingEnemies) {
             // Do not keep/spawn Baron after enemies are cleared.
             if (this.baron) {
                 this.baron.active = false;
@@ -732,6 +1026,9 @@ export class Game {
 
         // Update items
         for (const item of this.items) { if (item.active) item.update(this); }
+        if (this.rainbowRushActive && !this._hasActiveItemType(ITEM_CANDY, 'rainbow')) {
+            this._completeRainbowRush();
+        }
 
         // Update projectiles
         for (const proj of this.projectiles) { if (proj.active) proj.update(this); }
@@ -756,7 +1053,7 @@ export class Game {
 
         // Level clear — no enemies alive (trapped-but-alive count as still alive)
         // and no food/items left to collect.
-        if (!this.levelClearing) {
+        if (!this.levelClearing && !this.isBossStage) {
             const enemiesLeft = this.enemies.length; // all remaining are alive (see filter above)
             if (enemiesLeft === 0 && this.bubbleFoodRushTimer <= 0 && this.items.length === 0) {
                 this._startTransition(1);
@@ -764,10 +1061,44 @@ export class Game {
         }
     }
 
+    _ensureEnemiesPresentEarly() {
+        if (this.isBossStage || this.levelClearing) return;
+        // Safety window: if enemies disappear unexpectedly right after round start,
+        // re-seed them so stage 1+ never begins empty.
+        if (this.levelTimer > 5 * 60) return;
+        if (this.levelKillCount > 0) return;
+        const hasLiving = this.enemies.some(e => !e.dead && (e.active || e.trapped));
+        if (hasLiving) return;
+
+        const enemyDefs = Array.isArray(this.level?.data?.enemies) ? this.level.data.enemies : [];
+        if (enemyDefs.length === 0) return;
+
+        const maxEnemies = this.levelDifficulty?.maxEnemies || enemyDefs.length;
+        const targetCount = Math.max(1, Math.min(enemyDefs.length, Math.max(1, maxEnemies)));
+        const avoidXs = [];
+        if (this.level?.data?.p1Start) avoidXs.push(this.level.data.p1Start.col * TILE_SIZE);
+        if (this.twoPlayer && this.level?.data?.p2Start) avoidXs.push(this.level.data.p2Start.col * TILE_SIZE);
+
+        for (let i = 0; i < targetCount; i++) {
+            const spawnData = enemyDefs[i % enemyDefs.length];
+            this._spawnEnemy(spawnData, this.levelDifficulty, {
+                topDrop: false,
+                avoidXs,
+            });
+        }
+        this.levelEnemyTotal = Math.max(this.levelEnemyTotal, targetCount);
+    }
+
     _startTransition(levelAdvance = 1) {
         if (this.scene === SCENE_TRANSITION) return;
+        let advance = Math.max(1, levelAdvance | 0);
+        const currentRound = this._roundNumber(this.levelIndex);
+        if (currentRound < BOSS_STAGE_NUMBER) {
+            const remainToBoss = BOSS_STAGE_NUMBER - currentRound;
+            if (advance > remainToBoss) advance = remainToBoss;
+        }
         this.levelClearing   = true;
-        this.pendingLevelAdvance = Math.max(1, levelAdvance | 0);
+        this.pendingLevelAdvance = advance;
         this.transitionStyle = this.pendingLevelAdvance > 1 ? 'umbrella-travel' : 'normal';
         this.transitionStartRound = this._roundNumber(this.levelIndex);
         this.transitionRouteRounds = [];
@@ -802,7 +1133,8 @@ export class Game {
             }
         }
         if (this.transitionTimer <= 0) {
-            this.levelIndex += this.pendingLevelAdvance;
+            const next = this.levelIndex + this.pendingLevelAdvance;
+            this.levelIndex = ((next % MAX_STAGE_ROUNDS) + MAX_STAGE_ROUNDS) % MAX_STAGE_ROUNDS;
             this.pendingLevelAdvance = 1;
             this.transitionStyle = 'normal';
             this.transitionRouteRounds = [];
@@ -812,8 +1144,12 @@ export class Game {
     }
 
     _roundNumber(levelIndex) {
-        const n = LEVELS.length || 1;
+        const n = MAX_STAGE_ROUNDS;
         return ((levelIndex % n) + n) % n + 1;
+    }
+
+    getStageNumber(offset = 0) {
+        return this._roundNumber(this.levelIndex + (offset | 0));
     }
 
     getEnemyEscapeMultiplier() {
@@ -876,7 +1212,15 @@ export class Game {
             hurryUpTimer: this.hurryUpTimer,
             bubbleFoodRushTimer: this.bubbleFoodRushTimer,
             randomCakeSpawnTimer: this.randomCakeSpawnTimer,
+            rainbowIconSpawnTimer: this.rainbowIconSpawnTimer,
+            rainbowRushActive: !!this.rainbowRushActive,
+            rainbowRushTotal: this.rainbowRushTotal,
+            rainbowRushCollected: [...this.rainbowRushCollected],
+            rainbowRushResultTimer: this.rainbowRushResultTimer,
+            rainbowRushWinner: this.rainbowRushWinner,
             levelClearing: !!this.levelClearing,
+            isBossStage: !!this.isBossStage,
+            gameClear: !!this.gameClear,
             transitionTimer: this.transitionTimer,
             transitionDuration: this.transitionDuration,
             transitionStyle: this.transitionStyle,
@@ -889,6 +1233,7 @@ export class Game {
             titleGamepads: this.titleGamepads,
             titleBubbles: (this._titleBubbles || []).map(b => ({ x: b.x, y: b.y, w: b.w })),
             extendCollected: [...this.extendCollected],
+            extendRainbowTimer: this.extendRainbowTimer,
             players: this.players.map(p => ({
                 ...this._serializeEntityBase(p),
                 id: p.id,
@@ -920,13 +1265,19 @@ export class Game {
                 animFrame: e.animFrame || 0,
                 animTimer: e.animTimer || 0,
                 animSpeed: e.animSpeed || 0,
+                hp: Number.isFinite(e.hp) ? e.hp : null,
+                maxHp: Number.isFinite(e.maxHp) ? e.maxHp : null,
+                invuln: Number.isFinite(e.invuln) ? e.invuln : 0,
             })),
             bubbles: this.bubbles.map(b => ({
                 ...this._serializeEntityBase(b),
                 state: b.state,
                 dir: b.dir || 1,
                 ownerId: b.ownerId || 0,
+                kind: b.kind || 'normal',
+                lightningRequiredFacing: b.lightningRequiredFacing || 0,
                 lifetime: b.lifetime || 0,
+                maxLifetime: b.maxLifetime || 0,
                 travelTicks: b.travelTicks || 0,
                 wobbleT: b.wobbleT || 0,
                 popTimer: b.popTimer || 0,
@@ -1020,7 +1371,23 @@ export class Game {
         this.randomCakeSpawnTimer = Number.isFinite(snapshot.randomCakeSpawnTimer)
             ? snapshot.randomCakeSpawnTimer
             : this.randomCakeSpawnTimer;
+        this.rainbowIconSpawnTimer = Number.isFinite(snapshot.rainbowIconSpawnTimer)
+            ? snapshot.rainbowIconSpawnTimer
+            : this.rainbowIconSpawnTimer;
+        this.rainbowRushActive = !!snapshot.rainbowRushActive;
+        this.rainbowRushTotal = Number.isFinite(snapshot.rainbowRushTotal) ? snapshot.rainbowRushTotal : 0;
+        this.rainbowRushCollected = Array.isArray(snapshot.rainbowRushCollected)
+            ? [snapshot.rainbowRushCollected[0] | 0, snapshot.rainbowRushCollected[1] | 0]
+            : [0, 0];
+        this.rainbowRushResultTimer = Number.isFinite(snapshot.rainbowRushResultTimer)
+            ? snapshot.rainbowRushResultTimer
+            : 0;
+        this.rainbowRushWinner = typeof snapshot.rainbowRushWinner === 'string'
+            ? snapshot.rainbowRushWinner
+            : '';
         this.levelClearing = !!snapshot.levelClearing;
+        this.isBossStage = !!snapshot.isBossStage;
+        this.gameClear = !!snapshot.gameClear;
         this.transitionTimer = Number.isFinite(snapshot.transitionTimer) ? snapshot.transitionTimer : this.transitionTimer;
         this.transitionDuration = Number.isFinite(snapshot.transitionDuration) ? snapshot.transitionDuration : this.transitionDuration;
         this.transitionStyle = typeof snapshot.transitionStyle === 'string' ? snapshot.transitionStyle : this.transitionStyle;
@@ -1045,6 +1412,9 @@ export class Game {
             : this._titleBubbles;
 
         this.extendCollected = new Set(Array.isArray(snapshot.extendCollected) ? snapshot.extendCollected : []);
+        this.extendRainbowTimer = Number.isFinite(snapshot.extendRainbowTimer)
+            ? snapshot.extendRainbowTimer
+            : 0;
 
         this.players = (Array.isArray(snapshot.players) ? snapshot.players : []).map(p => {
             const rp = this._toRenderableEntity(p, { sizeW: 14, sizeH: 14 });
@@ -1079,15 +1449,24 @@ export class Game {
             re.animFrame = Number.isFinite(e.animFrame) ? e.animFrame : 0;
             re.animTimer = Number.isFinite(e.animTimer) ? e.animTimer : 0;
             re.animSpeed = Number.isFinite(e.animSpeed) ? e.animSpeed : 0;
+            re.hp = Number.isFinite(e.hp) ? e.hp : null;
+            re.maxHp = Number.isFinite(e.maxHp) ? e.maxHp : null;
+            re.invuln = Number.isFinite(e.invuln) ? e.invuln : 0;
             return re;
         });
+        this.bossEnemy = this.enemies.find(e => e.kind === 'DragonKing') || null;
 
         this.bubbles = (Array.isArray(snapshot.bubbles) ? snapshot.bubbles : []).map(b => {
             const rb = this._toRenderableEntity(b, { sizeW: 12, sizeH: 12 });
             rb.state = b.state || 'travel';
             rb.dir = Number.isFinite(b.dir) ? b.dir : 1;
             rb.ownerId = Number.isFinite(b.ownerId) ? b.ownerId : 0;
+            rb.kind = typeof b.kind === 'string' ? b.kind : 'normal';
+            rb.lightningRequiredFacing = Number.isFinite(b.lightningRequiredFacing)
+                ? (b.lightningRequiredFacing >= 0 ? 1 : -1)
+                : 0;
             rb.lifetime = Number.isFinite(b.lifetime) ? b.lifetime : 0;
+            rb.maxLifetime = Number.isFinite(b.maxLifetime) ? b.maxLifetime : 0;
             rb.travelTicks = Number.isFinite(b.travelTicks) ? b.travelTicks : 0;
             rb.wobbleT = Number.isFinite(b.wobbleT) ? b.wobbleT : 0;
             rb.popTimer = Number.isFinite(b.popTimer) ? b.popTimer : 0;

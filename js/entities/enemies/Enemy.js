@@ -21,6 +21,8 @@ export class Enemy extends Entity {
         this.baseEscapeTimer = 220;
         this.angrySpeedMul = 2.2;
         this._groundLockY  = Math.round(y);
+        this.spawnGrace    = 0;
+        this.introDrop     = false;
     }
 
     setAngry() {
@@ -34,17 +36,29 @@ export class Enemy extends Entity {
         if (this.dead || this.trapped) return;
         this.savePrev();
 
-        // AI logic (overridden by subclasses)
-        this._ai(game);
+        if (this.spawnGrace > 0) this.spawnGrace--;
+
+        // AI logic (overridden by subclasses).
+        // During intro drop, enemies only fall from the top.
+        if (this.introDrop) {
+            this.vel.x = 0;
+        } else {
+            this._ai(game);
+        }
 
         // Gravity
         this.vel.y = Math.min(this.vel.y + GRAVITY, MAX_FALL_SPEED);
 
         // Resolve Y
-        const { dy, onGround } = game.collisionMap.sweepY(this, this.vel.y);
+        const { dy, onGround } = game.collisionMap.sweepY(this, this.vel.y, this.introDrop
+            ? { allowTopEntry: true }
+            : null);
         this.pos.y += dy;
         this.onGround = onGround;
         if (onGround) this.vel.y = 0;
+        if (this.introDrop && onGround) {
+            this.introDrop = false;
+        }
         if (onGround) this.pos.y = Math.round(this.pos.y);
         if (STATIC_CHARACTER_VISUALS) {
             if (onGround) {
@@ -115,6 +129,7 @@ export class Enemy extends Entity {
         // Collision with players
         for (const player of game.players) {
             if (!player.active || player.dead) continue;
+            if (this.spawnGrace > 0 || this.introDrop) continue;
             const canSmash = (player.smashInvincible || 0) > 0;
             if (!canSmash && player.invincible > 0) continue;
             if (aabbOverlap(

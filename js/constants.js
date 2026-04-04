@@ -65,6 +65,7 @@ export const SCORE_GEM    = 2000;
 export const SCORE_SHOE   = 500;
 export const SCORE_UMBRELLA = 2500;
 export const SCORE_CAKE   = 5000;
+export const SCORE_RAINBOW = 1500;
 export const EXTRA_LIFE_SCORES = [30000, 100000, 200000, 400000, 1000000];
 
 // ── Scenes ────────────────────────────────────────────────────────────────────
@@ -88,3 +89,4 @@ export const ITEM_EXTEND = 'extend';  // carries a letter A-F (index 0-5)
 export const ITEM_POTION = 'potion';
 export const ITEM_UMBRELLA = 'umbrella';
 export const ITEM_CAKE    = 'cake';
+export const ITEM_RAINBOW = 'rainbow';

@@ -6,7 +6,7 @@ import {
 import { HUD } from '../game/HUD.js';
 import {
     drawPlayer, drawBubble, drawZenChan, drawMighta, drawMonsta,
-    drawBaron, drawItem, drawScorePopup
+    drawBaron, drawDragonKing, drawItem, drawScorePopup
 } from './SpriteDrawer.js';
 import { BS_FLOAT } from '../entities/Bubble.js';
 import {
@@ -85,7 +85,8 @@ export class Renderer {
             drawBubble(
                 ctx,
                 b.renderX(alpha), b.renderY(alpha) + oy,
-                NO_FLICKER_MODE ? 0 : b.wobbleT, !!b.trappedEnemy, b.state, b.popTimer
+                NO_FLICKER_MODE ? 0 : b.wobbleT, !!b.trappedEnemy, b.state, b.popTimer,
+                b.kind || 'normal', b.lightningRequiredFacing || 0
             );
         }
 
@@ -165,7 +166,10 @@ export class Renderer {
                 ctx.fillRect(0, HUD_HEIGHT, CANVAS_W, CANVAS_H - HUD_HEIGHT);
 
                 const mid = Math.round(HUD_HEIGHT + (CANVAS_H - HUD_HEIGHT) / 2);
-                drawGlowText(ctx, 'ROUND ' + String(game.levelIndex + 1).padStart(2, '0'),
+                const stage = typeof game.getStageNumber === 'function'
+                    ? game.getStageNumber()
+                    : (game.levelIndex + 1);
+                drawGlowText(ctx, 'ROUND ' + String(stage).padStart(2, '0'),
                     CANVAS_W / 2, mid - 14, 2, '#FFFF66', '#FFAA00');
                 drawGlowText(ctx, 'GREAT!',
                     CANVAS_W / 2, mid + 4, 2, '#FFFFFF', '#88FFFF');
@@ -181,6 +185,10 @@ export class Renderer {
         vEdge.addColorStop(1,   'rgba(0,0,0,0.25)');
         ctx.fillStyle = vEdge;
         ctx.fillRect(0, HUD_HEIGHT, CANVAS_W, playH);
+
+        if (game.isBossStage && game.bossEnemy && !game.bossEnemy.dead) {
+            this._drawBossHud(ctx, game);
+        }
 
         // ── HUD ──────────────────────────────────────────────────────────────
         this.hud.draw(ctx, game);
@@ -242,10 +250,46 @@ export class Renderer {
         if      (type === 'ZenChan') drawZenChan(ctx, x, y, frame, e.angry, e.trapped);
         else if (type === 'Mighta')  drawMighta (ctx, x, y, frame, e.angry);
         else if (type === 'Monsta')  drawMonsta (ctx, x, y, frame, e.angry);
+        else if (type === 'DragonKing') drawDragonKing(
+            ctx,
+            x,
+            y,
+            frame,
+            Number.isFinite(e.hp) ? e.hp : 0,
+            Number.isFinite(e.maxHp) ? e.maxHp : 1,
+            Number.isFinite(e.invuln) ? e.invuln : 0
+        );
         else {
             ctx.fillStyle = e.angry ? '#FF3300' : '#FF8800';
             ctx.fillRect(Math.round(x), Math.round(y), e.size.w, e.size.h);
         }
+    }
+
+    _drawBossHud(ctx, game) {
+        const boss = game.bossEnemy;
+        if (!boss) return;
+        const hp = Math.max(0, Number.isFinite(boss.hp) ? boss.hp : 0);
+        const maxHp = Math.max(1, Number.isFinite(boss.maxHp) ? boss.maxHp : 1);
+        const frac = Math.max(0, Math.min(1, hp / maxHp));
+        const barW = 140;
+        const barH = 8;
+        const bx = Math.round((CANVAS_W - barW) * 0.5);
+        const by = HUD_HEIGHT + 6;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(bx - 2, by - 2, barW + 4, barH + 4);
+        ctx.fillStyle = 'rgba(30,40,58,0.95)';
+        ctx.fillRect(bx, by, barW, barH);
+
+        const g = ctx.createLinearGradient(bx, by, bx + barW, by);
+        g.addColorStop(0, '#FFF08A');
+        g.addColorStop(1, '#FF6A5A');
+        ctx.fillStyle = g;
+        ctx.fillRect(bx, by, Math.round(barW * frac), barH);
+        ctx.strokeStyle = 'rgba(214,241,255,0.8)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + 0.5, by + 0.5, barW - 1, barH - 1);
+        drawTextCentered(ctx, `BOSS HP ${hp}/${maxHp}`, CANVAS_W / 2, by - 8, 1, '#FFEFA0');
     }
 
     _drawUmbrellaTravelOverlay(ctx, game, t) {
@@ -272,8 +316,12 @@ export class Renderer {
 
         const route = (Array.isArray(game.transitionRouteRounds) && game.transitionRouteRounds.length > 0)
             ? game.transitionRouteRounds.slice()
-            : [((game.levelIndex + 1) % 99) + 1];
-        const startRound = game.transitionStartRound || (game.levelIndex + 1);
+            : [typeof game.getStageNumber === 'function' ? game.getStageNumber(1) : (game.levelIndex + 2)];
+        const startRound = game.transitionStartRound || (
+            typeof game.getStageNumber === 'function'
+                ? game.getStageNumber()
+                : (game.levelIndex + 1)
+        );
         const nodeRounds = [startRound, ...route];
         const steps = Math.max(1, nodeRounds.length - 1);
 
@@ -480,34 +528,49 @@ export class Renderer {
 
     // ── Game Over screen ──────────────────────────────────────────────────────
     _drawGameOver(ctx, game) {
+        const cleared = !!game.gameClear;
         // Dark background with purple-red gradient
         const bg = ctx.createLinearGradient(0, 0, 0, CANVAS_H);
-        bg.addColorStop(0, '#120012');
-        bg.addColorStop(1, '#040007');
+        if (cleared) {
+            bg.addColorStop(0, '#02132A');
+            bg.addColorStop(1, '#01050E');
+        } else {
+            bg.addColorStop(0, '#120012');
+            bg.addColorStop(1, '#040007');
+        }
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
         // Pulsing red vignette
         const pulse = NO_FLICKER_MODE ? 0.3 : (0.3 + 0.3 * Math.sin(game.gameOverTimer * 0.05));
         const rg = ctx.createRadialGradient(CANVAS_W/2, CANVAS_H/2, 0, CANVAS_W/2, CANVAS_H/2, 140);
-        rg.addColorStop(0, `rgba(60,0,0,${pulse})`);
+        rg.addColorStop(0, cleared ? `rgba(0,80,120,${pulse})` : `rgba(60,0,0,${pulse})`);
         rg.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = rg;
         ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-        // GAME OVER with red neon glow
-        drawGlowText(ctx, 'GAME', CANVAS_W / 2, 58, 4, '#FF2222', '#CC0000');
-        drawGlowText(ctx, 'OVER', CANVAS_W / 2, 79, 4, '#FF2222', '#CC0000');
+        if (cleared) {
+            drawGlowText(ctx, 'GAME', CANVAS_W / 2, 58, 4, '#8AF2FF', '#2A8CD8');
+            drawGlowText(ctx, 'CLEAR', CANVAS_W / 2, 79, 4, '#E8FF8A', '#8AC92A');
+            drawTextCentered(ctx, 'DRAGON KING DOWN!', CANVAS_W / 2, 96, 1, '#AEEBFF');
+        } else {
+            // GAME OVER with red neon glow
+            drawGlowText(ctx, 'GAME', CANVAS_W / 2, 58, 4, '#FF2222', '#CC0000');
+            drawGlowText(ctx, 'OVER', CANVAS_W / 2, 79, 4, '#FF2222', '#CC0000');
+        }
 
         // Score panel
         ctx.fillStyle = 'rgba(255,255,255,0.05)';
         ctx.fillRect(50, 108, CANVAS_W - 100, 24);
         drawTextCentered(ctx, 'SCORE', CANVAS_W / 2, 110, 1, '#FFDD00');
-        const sc = formatScore(game.scores[0]);
+        const finalScore = Number.isFinite(game.gameOverFinalScore)
+            ? game.gameOverFinalScore
+            : Math.max(...(Array.isArray(game.scores) ? game.scores : [0]), 0);
+        const sc = formatScore(finalScore);
         drawGlowText(ctx, sc, CANVAS_W / 2, 119, 2, '#FFFFFF', '#AADDFF');
 
         // New high score flash
-        if (game.scores[0] > 0 && game.scores[0] >= game.highScore) {
+        if (!cleared && finalScore > 0 && finalScore >= game.highScore) {
             if (NO_FLICKER_MODE || (Math.floor(game.gameOverTimer / 18) % 2 === 0)) {
                 drawGlowText(ctx, 'NEW RECORD!', CANVAS_W / 2, 148, 1, '#FFE033', '#FF8800');
             }

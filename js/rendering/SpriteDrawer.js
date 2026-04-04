@@ -340,15 +340,18 @@ export function drawPlayer(
     ctx.restore();
 }
 
-export function drawBubble(ctx, x, y, wobble, hasEnemy, state, popFrame) {
+export function drawBubble(ctx, x, y, wobble, hasEnemy, state, popFrame, kind = 'normal', lightningRequiredFacing = 0) {
     const cx = x + 6;
     const cy = y + 6;
     const r = 5.85;
+    const isLightning = kind === 'lightning';
 
     if (state === 'popping') {
         const t = Math.min(1, popFrame / 8);
         const inv = 1 - t;
-        const base = hasEnemy ? '255,130,95' : '128,222,255';
+        const base = isLightning
+            ? '255,230,110'
+            : (hasEnemy ? '255,130,95' : '128,222,255');
         const burstR = r * (0.56 + t * 0.76);
 
         ctx.save();
@@ -391,7 +394,9 @@ export function drawBubble(ctx, x, y, wobble, hasEnemy, state, popFrame) {
         return;
     }
 
-    const palette = hasEnemy
+    const palette = isLightning
+        ? { rim: '#FFE77A', inner0: 'rgba(255,241,145,0.56)', inner1: 'rgba(170,220,255,0.22)', glow: '#FFF08E' }
+        : hasEnemy
         ? { rim: '#FF8A70', inner0: 'rgba(255,145,120,0.45)', inner1: 'rgba(255,90,70,0.12)', glow: '#FF8A70' }
         : { rim: '#9FE9FF', inner0: 'rgba(178,243,255,0.50)', inner1: 'rgba(120,200,255,0.14)', glow: '#8ADFFF' };
 
@@ -430,6 +435,38 @@ export function drawBubble(ctx, x, y, wobble, hasEnemy, state, popFrame) {
         ctx.fillStyle = `rgba(255,74,74,${0.5 + pulse * 0.25})`;
         ctx.beginPath();
         ctx.arc(cx, cy, 2.4 + pulse * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    if (isLightning) {
+        ctx.fillStyle = 'rgba(255,225,90,0.92)';
+        ctx.beginPath();
+        ctx.moveTo(cx - 0.9, cy - 2.7);
+        ctx.lineTo(cx + 0.5, cy - 2.7);
+        ctx.lineTo(cx - 0.3, cy - 0.8);
+        ctx.lineTo(cx + 1.0, cy - 0.8);
+        ctx.lineTo(cx - 1.2, cy + 2.8);
+        ctx.lineTo(cx - 0.2, cy + 0.4);
+        ctx.lineTo(cx - 1.3, cy + 0.4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(110,80,0,0.9)';
+        ctx.lineWidth = 0.65;
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.beginPath();
+        if (lightningRequiredFacing >= 0) {
+            ctx.moveTo(cx + 3.7, cy - 0.5);
+            ctx.lineTo(cx + 2.3, cy - 1.4);
+            ctx.lineTo(cx + 2.3, cy + 0.4);
+        } else {
+            ctx.moveTo(cx - 3.7, cy - 0.5);
+            ctx.lineTo(cx - 2.3, cy - 1.4);
+            ctx.lineTo(cx - 2.3, cy + 0.4);
+        }
+        ctx.closePath();
         ctx.fill();
     }
 
@@ -654,6 +691,128 @@ export function drawBaron(ctx, x, y, frame) {
     ctx.restore();
 }
 
+export function drawDragonKing(ctx, x, y, frame, hp = 14, maxHp = 14, invuln = 0) {
+    const px = Math.round(x);
+    const py = Math.round(y);
+    const hpSafe = Math.max(0, Number.isFinite(hp) ? hp : 0);
+    const maxSafe = Math.max(1, Number.isFinite(maxHp) ? maxHp : 14);
+    const hpFrac = Math.max(0, Math.min(1, hpSafe / maxSafe));
+
+    ctx.save();
+    ctx.translate(px, py);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.24)';
+    roundedRect(ctx, 3, 22, 28, 3.2, 1.4);
+    ctx.fill();
+
+    const body = ctx.createLinearGradient(0, 0, 0, 24);
+    body.addColorStop(0, '#79D8FF');
+    body.addColorStop(1, '#2D7FC2');
+    ctx.fillStyle = body;
+    roundedRect(ctx, 2.2, 4.4, 24.2, 16.6, 6.5);
+    ctx.fill();
+    ctx.strokeStyle = '#0E213B';
+    ctx.lineWidth = 1.2;
+    roundedRect(ctx, 2.2, 4.4, 24.2, 16.6, 6.5);
+    ctx.stroke();
+
+    // Belly
+    ctx.fillStyle = '#EAF8FF';
+    roundedRect(ctx, 9.2, 10.1, 9.8, 8.8, 3.6);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(21,53,85,0.7)';
+    ctx.lineWidth = 0.8;
+    roundedRect(ctx, 9.2, 10.1, 9.8, 8.8, 3.6);
+    ctx.stroke();
+
+    // Head
+    const head = ctx.createLinearGradient(0, -1, 0, 12);
+    head.addColorStop(0, '#8BE3FF');
+    head.addColorStop(1, '#3B94D8');
+    ctx.fillStyle = head;
+    roundedRect(ctx, 16.4, 2.2, 14.4, 11.3, 4.8);
+    ctx.fill();
+    ctx.strokeStyle = '#0E213B';
+    ctx.lineWidth = 1.1;
+    roundedRect(ctx, 16.4, 2.2, 14.4, 11.3, 4.8);
+    ctx.stroke();
+
+    // Eyes
+    ctx.fillStyle = '#FFFFFF';
+    roundedRect(ctx, 19.0, 5.0, 3.7, 3.0, 1.2); ctx.fill();
+    roundedRect(ctx, 24.0, 5.0, 3.7, 3.0, 1.2); ctx.fill();
+    ctx.strokeStyle = '#102236';
+    ctx.lineWidth = 0.8;
+    roundedRect(ctx, 19.0, 5.0, 3.7, 3.0, 1.2); ctx.stroke();
+    roundedRect(ctx, 24.0, 5.0, 3.7, 3.0, 1.2); ctx.stroke();
+    ctx.fillStyle = '#0F1A28';
+    ctx.beginPath(); ctx.arc(20.9, 6.5, 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(25.9, 6.5, 0.55, 0, Math.PI * 2); ctx.fill();
+
+    // Mouth
+    ctx.strokeStyle = '#15314F';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(20.2, 10.0);
+    ctx.quadraticCurveTo(23.3, 11.6, 27.2, 10.0);
+    ctx.stroke();
+
+    // Spikes
+    const spikeColors = ['#BFEAFA', '#A3D8F4', '#8BC9EA', '#74B6DF'];
+    for (let i = 0; i < 4; i++) {
+        const sx = 5.0 + i * 3.6;
+        ctx.fillStyle = spikeColors[i];
+        ctx.beginPath();
+        ctx.moveTo(sx, 4.9);
+        ctx.lineTo(sx + 1.6, 1.4);
+        ctx.lineTo(sx + 3.2, 4.9);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#14365A';
+        ctx.lineWidth = 0.75;
+        ctx.stroke();
+    }
+
+    // Tail
+    ctx.fillStyle = '#4BA9DE';
+    ctx.beginPath();
+    ctx.moveTo(2.4, 14.0);
+    ctx.quadraticCurveTo(-3.2, 13.2, -5.4, 17.2);
+    ctx.quadraticCurveTo(-2.3, 18.2, 1.8, 17.0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#14365A';
+    ctx.lineWidth = 0.95;
+    ctx.stroke();
+
+    // Wing
+    const wing = ctx.createLinearGradient(0, 7, 0, 18);
+    wing.addColorStop(0, '#F5FDFF');
+    wing.addColorStop(1, '#CDEFFF');
+    ctx.fillStyle = wing;
+    roundedRect(ctx, 6.2, 9.0, 8.2, 5.2, 2.4);
+    ctx.fill();
+    ctx.strokeStyle = '#255984';
+    ctx.lineWidth = 0.85;
+    roundedRect(ctx, 6.2, 9.0, 8.2, 5.2, 2.4);
+    ctx.stroke();
+
+    if (invuln > 0) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1.2;
+        roundedRect(ctx, 1.4, 3.5, 29.8, 18.6, 6.5);
+        ctx.stroke();
+    }
+
+    // HP halo
+    if (hpFrac <= 0.35) {
+        circleGlow(ctx, 17, 12, 9.5, '#FF6A6A', 9, 0.18);
+    }
+
+    ctx.restore();
+}
+
 const ITEM_COLORS = {
     candy:  ['#FF5D7D', '#FFC3D2'],
     ring:   ['#F7B500', '#FFF08A'],
@@ -663,6 +822,7 @@ const ITEM_COLORS = {
     potion: ['#35B4FF', '#95EAFF'],
     umbrella: ['#4EC7FF', '#D9F7FF'],
     cake: ['#FF8FB0', '#FFE8F0'],
+    rainbow: ['#6DE9FF', '#FFE7A5'],
 };
 
 const EXTEND_CHARS = 'EXTEND';
@@ -770,6 +930,30 @@ function drawFoodCherry(ctx, px, py) {
     ctx.beginPath(); ctx.arc(px + 3.2, py + 5.0, 0.45, 0, Math.PI * 2); ctx.fill();
 }
 
+function drawFoodRainbow(ctx, px, py) {
+    circleGlow(ctx, px + 5, py + 5.5, 3.9, '#C8A6FF', 7, 0.15);
+    ctx.strokeStyle = '#2B4F8E';
+    ctx.lineWidth = 1.0;
+    ctx.beginPath();
+    ctx.arc(px + 5, py + 6.2, 3.4, Math.PI, Math.PI * 2);
+    ctx.stroke();
+
+    const bands = ['#FF5A73', '#FFA53A', '#FFE55A', '#6AE98D', '#63B2FF', '#B47CFF'];
+    for (let i = 0; i < bands.length; i++) {
+        ctx.strokeStyle = bands[i];
+        ctx.lineWidth = 0.58;
+        const rr = 3.2 - i * 0.37;
+        ctx.beginPath();
+        ctx.arc(px + 5, py + 6.1, rr, Math.PI, Math.PI * 2);
+        ctx.stroke();
+    }
+    ctx.fillStyle = '#F7FCFF';
+    roundedRect(ctx, px + 1.4, py + 6.1, 1.9, 1.6, 0.55);
+    ctx.fill();
+    roundedRect(ctx, px + 6.7, py + 6.1, 1.9, 1.6, 0.55);
+    ctx.fill();
+}
+
 function drawCandyFruit(ctx, px, py, kind) {
     switch (kind) {
         case 'strawberry': drawFoodStrawberry(ctx, px, py); break;
@@ -777,6 +961,7 @@ function drawCandyFruit(ctx, px, py, kind) {
         case 'apple':      drawFoodApple(ctx, px, py); break;
         case 'banana':     drawFoodBanana(ctx, px, py); break;
         case 'cherry':     drawFoodCherry(ctx, px, py); break;
+        case 'rainbow':    drawFoodRainbow(ctx, px, py); break;
         default:           drawFoodStrawberry(ctx, px, py); break;
     }
 }
@@ -816,6 +1001,41 @@ export function drawItem(ctx, x, y, type, extendIndex, foodKind = 'strawberry') 
         ctx.moveTo(px + 6.0, py + 10.0);
         ctx.quadraticCurveTo(px + 7.5, py + 10.9, px + 8.0, py + 9.6);
         ctx.stroke();
+        return;
+    }
+
+    if (type === 'rainbow') {
+        circleGlow(ctx, px + 6, py + 6, 4.6, '#A8D5FF', 8, 0.18);
+        const g = ctx.createLinearGradient(0, py, 0, py + 12);
+        g.addColorStop(0, '#EAF8FF');
+        g.addColorStop(1, '#96CFFF');
+        ctx.fillStyle = g;
+        roundedRect(ctx, px + 0.5, py + 0.5, 11, 11, 2.6);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(48,88,140,0.88)';
+        ctx.lineWidth = 0.95;
+        roundedRect(ctx, px + 0.5, py + 0.5, 11, 11, 2.6);
+        ctx.stroke();
+
+        // Mini rainbow icon
+        ctx.strokeStyle = '#214E8A';
+        ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        ctx.arc(px + 6.0, py + 7.0, 3.1, Math.PI, Math.PI * 2);
+        ctx.stroke();
+        const mini = ['#FF5A73', '#FFB14A', '#FFE66E', '#66E89A', '#67B1FF', '#B687FF'];
+        for (let i = 0; i < mini.length; i++) {
+            ctx.strokeStyle = mini[i];
+            ctx.lineWidth = 0.46;
+            ctx.beginPath();
+            ctx.arc(px + 6.0, py + 7.0, 2.9 - i * 0.3, Math.PI, Math.PI * 2);
+            ctx.stroke();
+        }
+        ctx.fillStyle = '#F4FBFF';
+        roundedRect(ctx, px + 3.1, py + 7.0, 1.4, 1.2, 0.4);
+        ctx.fill();
+        roundedRect(ctx, px + 7.5, py + 7.0, 1.4, 1.2, 0.4);
+        ctx.fill();
         return;
     }
 

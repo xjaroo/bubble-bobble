@@ -102,6 +102,7 @@ export class CollisionMap {
     sweepY(entity, dy, opts = null) {
         const { pos, size } = entity;
         const ignorePlatforms = !!(opts && opts.ignorePlatforms);
+        const allowTopEntry = !!(opts && opts.allowTopEntry);
         // Three horizontal probe points: left, mid, right
         const probeXs = [pos.x + 1, pos.x + size.w * 0.5, pos.x + size.w - 2];
 
@@ -132,6 +133,11 @@ export class CollisionMap {
             for (const px of probeXs) {
                 const col = Math.floor(Math.max(0, Math.min(PLAY_W - 1, px)) / TILE_SIZE);
                 const row = Math.floor(edgeY / TILE_SIZE);
+                // Allow entities spawned above the map (negative rows) to fall
+                // into the playfield instead of getting stuck on the virtual top boundary.
+                if (row < 0) continue;
+                // Optional: allow entering from above through the top border row.
+                if (allowTopEntry && row === 0) continue;
                 if (this.isSolid(col, row)) {
                     const resolvedDy = row * TILE_SIZE - size.h - pos.y;
                     dy = Math.min(dy, resolvedDy);

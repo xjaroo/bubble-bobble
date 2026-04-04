@@ -1,8 +1,8 @@
 import { Entity } from './Entity.js';
 import {
     ITEM_W, ITEM_H, ITEM_GRAVITY, ITEM_LIFETIME,
-    SCORE_CANDY, SCORE_RING, SCORE_GEM, SCORE_SHOE, SCORE_UMBRELLA, SCORE_CAKE,
-    ITEM_CANDY, ITEM_RING, ITEM_GEM, ITEM_SHOE, ITEM_EXTEND, ITEM_POTION, ITEM_UMBRELLA, ITEM_CAKE,
+    SCORE_CANDY, SCORE_RING, SCORE_GEM, SCORE_SHOE, SCORE_UMBRELLA, SCORE_CAKE, SCORE_RAINBOW,
+    ITEM_CANDY, ITEM_RING, ITEM_GEM, ITEM_SHOE, ITEM_EXTEND, ITEM_POTION, ITEM_UMBRELLA, ITEM_CAKE, ITEM_RAINBOW,
     PLAY_W, NO_FLICKER_MODE
 } from '../constants.js';
 import { aabbOverlap } from '../utils/MathUtil.js';
@@ -21,6 +21,9 @@ export class Item extends Entity {
     init(x, y, type, extendIndex = 0, lifetimeLimit = ITEM_LIFETIME, foodKind = null) {
         if (type === ITEM_CAKE) {
             this.size.w = 16;
+            this.size.h = 12;
+        } else if (type === ITEM_RAINBOW) {
+            this.size.w = 12;
             this.size.h = 12;
         } else if (type === ITEM_UMBRELLA) {
             this.size.w = 12;
@@ -105,6 +108,9 @@ export class Item extends Entity {
         switch (this.type) {
             case ITEM_CANDY:
                 game.addScore(player.id, SCORE_CANDY);
+                if (this.foodKind === 'rainbow' && typeof game.onRainbowFoodCollected === 'function') {
+                    game.onRainbowFoodCollected(player.id);
+                }
                 break;
             case ITEM_RING:
                 game.addScore(player.id, SCORE_RING);
@@ -131,6 +137,12 @@ export class Item extends Entity {
                 break;
             case ITEM_CAKE:
                 game.addScore(player.id, SCORE_CAKE);
+                break;
+            case ITEM_RAINBOW:
+                game.addScore(player.id, SCORE_RAINBOW);
+                if (typeof game.onRainbowIconCollected === 'function') {
+                    game.onRainbowIconCollected(player.id);
+                }
                 break;
         }
         this.active = false;

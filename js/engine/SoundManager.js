@@ -545,6 +545,20 @@ export class SoundManager {
                     setTimeout(() => this._tone(f, 'sine', 0.01, 0.08, 0.1, 0.5), i * 100)
                 );
                 break;
+            case 'celebrate': {
+                const lead = [784, 988, 1175, 1568, 1175, 1319, 1568, 1760];
+                const bass = [262, 294, 330, 392];
+                lead.forEach((f, i) =>
+                    setTimeout(() => this._tone(f, 'triangle', 0.01, 0.10, 0.12, 0.56), i * 105)
+                );
+                bass.forEach((f, i) =>
+                    setTimeout(() => this._tone(f, 'square', 0.01, 0.14, 0.12, 0.24), i * 210)
+                );
+                [0, 210, 420, 630].forEach((t) =>
+                    setTimeout(() => this._noise(0.03, 0.08), t)
+                );
+                break;
+            }
             case 'levelclear':
                 [523, 659, 784, 1047].forEach((f, i) =>
                     setTimeout(() => this._tone(f, 'triangle', 0.01, 0.1, 0.15, 0.5), i * 120)
