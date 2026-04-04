@@ -60,10 +60,11 @@ export class Bubble extends Entity {
         this.popTimer = 0;
         this.pushCrashTimer = 0;
         this.lastPushPlayerId = ownerId;
+        this.lightningSettled = false;
         this.active   = true;
         if (this.state === BS_FLOAT) {
             this.vel.x = 0;
-            this.vel.y = kind === 'lightning' ? 0 : -BUBBLE_FLOAT_SPEED;
+            this.vel.y = kind === 'lightning' ? 0.52 : -BUBBLE_FLOAT_SPEED;
         }
     }
 
@@ -151,7 +152,12 @@ export class Bubble extends Entity {
     _updateFloat(game) {
         if (this.kind === 'lightning') {
             this.vel.x = 0;
-            this.vel.y = 0;
+            if (!this.lightningSettled) {
+                // Boss lightning bubbles drop to reachable lanes first.
+                this.vel.y = Math.max(this.vel.y, 0.52);
+            } else {
+                this.vel.y = 0;
+            }
         } else {
             this.wobbleT += BUBBLE_WOBBLE_SPEED;
             this.vel.x = Math.sin(this.wobbleT) * BUBBLE_WOBBLE_AMP * 0.04;
@@ -166,7 +172,10 @@ export class Bubble extends Entity {
         this.pos.y += dy;
 
         // Stick at ceiling once we float up there
-        if (hitCeiling || onGround) this.vel.y = 0;
+        if (hitCeiling || onGround) {
+            this.vel.y = 0;
+            if (this.kind === 'lightning') this.lightningSettled = true;
+        }
 
         // Auto-pop after lifetime expires
         if (this.lifetime >= this.maxLifetime) {
@@ -282,6 +291,17 @@ export class Bubble extends Entity {
             const bubbleH = this.size.h;
             const playerCenterX = px + pw * 0.5;
             const bubbleCenterX = bubbleX + bubbleW * 0.5;
+
+            if (isLightning) {
+                // Make boss mechanic readable: if touching and facing matches symbol,
+                // allow immediate burst (no strict front/back micro-hitbox requirement).
+                if (player.facing !== this.lightningRequiredFacing) continue;
+                if (aabbOverlap(px, py, pw, ph, bubbleX, bubbleY, bubbleW, bubbleH)) {
+                    this.pop(game, true, player.id);
+                    return true;
+                }
+                continue;
+            }
 
             if (player.facing >= 0) {
                 const inFront = bubbleCenterX >= playerCenterX;
@@ -412,8 +432,13 @@ export class Bubble extends Entity {
         game.sound.play('pop');
 
         if (this.kind === 'lightning') {
-            if (byPlayer && typeof game.onLightningBubbleBurst === 'function') {
-                game.onLightningBubbleBurst(playerId, this.lightningRequiredFacing);
+            if (typeof game.onLightningBubbleBurst === 'function') {
+                game.onLightningBubbleBurst(
+                    byPlayer ? playerId : 0,
+                    this.lightningRequiredFacing,
+                    this.pos.x + this.size.w * 0.5,
+                    this.pos.y + this.size.h * 0.5
+                );
             }
             this.trappedEnemy = null;
             return;

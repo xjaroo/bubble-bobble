@@ -24,7 +24,7 @@ export class BaronVonBlubba extends Entity {
         // Find nearest player
         let target = null, minD = Infinity;
         for (const p of game.players) {
-            if (!p.active || p.dead) continue;
+            if (!p.active || p.dead || (p.invincible || 0) > 0) continue;
             const dx = p.pos.x - this.pos.x;
             const dy = p.pos.y - this.pos.y;
             const d  = dx * dx + dy * dy;

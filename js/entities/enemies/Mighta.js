@@ -16,16 +16,19 @@ export class Mighta extends Enemy {
 
     _ai(game) {
         this.vel.x = this.dir * this.speed;
+        const canRetarget = this.retargetCooldown <= 0;
 
         // Find nearest player
         let nearestPlayer = null;
         let nearestDist   = Infinity;
-        for (const p of game.players) {
-            if (!p.active || p.dead) continue;
-            const dx = p.pos.x - this.pos.x;
-            const dy = p.pos.y - this.pos.y;
-            const d  = dx * dx + dy * dy;
-            if (d < nearestDist) { nearestDist = d; nearestPlayer = p; }
+        if (canRetarget) {
+            for (const p of game.players) {
+                if (!p.active || p.dead || (p.invincible || 0) > 0) continue;
+                const dx = p.pos.x - this.pos.x;
+                const dy = p.pos.y - this.pos.y;
+                const d  = dx * dx + dy * dy;
+                if (d < nearestDist) { nearestDist = d; nearestPlayer = p; }
+            }
         }
 
         if (nearestPlayer) {

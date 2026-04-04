@@ -41,7 +41,7 @@ const TILE_PALETTES = [
 // - keep border walls intact
 // - remove most interior solid bricks
 // - thin one-way bars so vertical routes are more open
-const EASY_LAYOUT_MODE = true;
+const EASY_LAYOUT_MODE = false;
 
 export class Level {
     constructor(data) {

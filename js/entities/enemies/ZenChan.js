@@ -25,7 +25,10 @@ export class ZenChan extends Enemy {
                 this.jumpTimer = randInt(80, 200);
                 // Bias toward the nearest player
                 const player = game.players[0];
-                if (player && player.active) {
+                if (
+                    this.retargetCooldown <= 0 &&
+                    player && player.active && !player.dead && (player.invincible || 0) <= 0
+                ) {
                     this.dir = player.pos.x > this.pos.x ? 1 : -1;
                 }
             }

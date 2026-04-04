@@ -5,7 +5,7 @@ import {
     STATIC_CHARACTER_VISUALS
 } from '../constants.js';
 
-const INVINCIBLE_TICKS = 120; // after respawn
+const INVINCIBLE_TICKS = 180; // after respawn
 const RESPAWN_TICKS    = 90;  // death animation duration
 const GROUND_ACCEL      = 0.065;
 const AIR_ACCEL         = 0.045;
@@ -285,6 +285,9 @@ export class Player extends Entity {
         this.dropThroughTimer = 0;
         this.bubbleBoost = 0;
         this.onGround   = false;
+        if (typeof game.onPlayerRespawn === 'function') {
+            game.onPlayerRespawn(this);
+        }
     }
 
     get visible() {

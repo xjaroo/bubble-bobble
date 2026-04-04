@@ -79,10 +79,12 @@ export class SoundManager {
         this._synthPatternLen = 32;
         this._sampleBuffers   = new Map();
         this._sampleStatus    = new Map();
-        this._useYoutubeBgm   = true;
+        // Offline-first: YouTube BGM is opt-in via window.BB_ENABLE_YOUTUBE_BGM = true.
+        this._useYoutubeBgm   = typeof window !== 'undefined'
+            && window.BB_ENABLE_YOUTUBE_BGM === true;
         this._ytPlayer        = null;
         this._ytReady         = false;
-        this._ytFailed        = false;
+        this._ytFailed        = !this._useYoutubeBgm;
         this._ytHostEl        = null;
         this._ytLoadTimer     = null;
 
@@ -98,7 +100,7 @@ export class SoundManager {
         } catch (e) {
             console.warn('Web Audio not available');
         }
-        this._initYoutubeBgm();
+        if (this._useYoutubeBgm) this._initYoutubeBgm();
         this._initBgm();
         this._initSfxSamples();
     }
@@ -567,6 +569,16 @@ export class SoundManager {
             case 'hurryup':
                 this._tone(880, 'square', 0.01, 0.08, 0.05, 0.5);
                 setTimeout(() => this._tone(1175, 'square', 0.01, 0.08, 0.05, 0.5), 200);
+                break;
+            case 'thunder':
+                this._noise(0.18, 0.2);
+                this._sweep(180, 70, 'sawtooth', 0.32, 0.32);
+                setTimeout(() => this._noise(0.1, 0.12), 80);
+                break;
+            case 'flood':
+                this._noise(0.28, 0.18);
+                this._sweep(220, 95, 'triangle', 0.4, 0.24);
+                setTimeout(() => this._tone(140, 'sine', 0.01, 0.24, 0.08, 0.2), 90);
                 break;
         }
     }

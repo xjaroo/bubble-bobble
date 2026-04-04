@@ -131,14 +131,29 @@ export class Renderer {
             if (!proj.active) continue;
             const x = Math.round(proj.renderX(alpha));
             const y = Math.round(proj.renderY(alpha)) + oy;
-            ctx.fillStyle = 'rgba(255,180,40,0.22)';
-            ctx.fillRect(x - 1, y - 1, proj.size.w + 2, proj.size.h + 2);
-            const g = ctx.createLinearGradient(x, y, x + proj.size.w, y + proj.size.h);
-            g.addColorStop(0, '#FFF18A');
-            g.addColorStop(1, '#FF9D17');
-            ctx.fillStyle = g;
-            ctx.fillRect(x, y, proj.size.w, proj.size.h);
+            if (proj.mode === 'lightning') {
+                ctx.fillStyle = 'rgba(132,235,255,0.26)';
+                ctx.fillRect(x - 2, y - 2, proj.size.w + 4, proj.size.h + 4);
+                const g = ctx.createLinearGradient(x, y, x + proj.size.w, y + proj.size.h);
+                g.addColorStop(0, '#E8FFFF');
+                g.addColorStop(0.55, '#86E2FF');
+                g.addColorStop(1, '#4FB7FF');
+                ctx.fillStyle = g;
+                ctx.fillRect(x, y, proj.size.w, proj.size.h);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(x + 1, y + 1, Math.max(2, proj.size.w - 2), 1);
+            } else {
+                ctx.fillStyle = 'rgba(255,180,40,0.22)';
+                ctx.fillRect(x - 1, y - 1, proj.size.w + 2, proj.size.h + 2);
+                const g = ctx.createLinearGradient(x, y, x + proj.size.w, y + proj.size.h);
+                g.addColorStop(0, '#FFF18A');
+                g.addColorStop(1, '#FF9D17');
+                ctx.fillStyle = g;
+                ctx.fillRect(x, y, proj.size.w, proj.size.h);
+            }
         }
+
+        this._drawWeatherEffects(ctx, game, oy);
 
         // ── Baron Von Blubba ─────────────────────────────────────────────────
         if (game.baron && game.baron.active) {
@@ -192,6 +207,103 @@ export class Renderer {
 
         // ── HUD ──────────────────────────────────────────────────────────────
         this.hud.draw(ctx, game);
+    }
+
+    _drawWeatherEffects(ctx, game, oy) {
+        const strikes = Array.isArray(game.stormStrikes) ? game.stormStrikes : [];
+        for (const s of strikes) {
+            const maxT = Math.max(1, s.maxTimer || 1);
+            const a = Math.max(0, Math.min(1, (s.timer || 0) / maxT));
+            const points = Array.isArray(s.points) ? s.points : null;
+
+            if (points && points.length >= 2) {
+                const main = points.map((p) => ({
+                    x: Math.round(Number(p?.x || 0)),
+                    y: Math.round(Number(p?.y || 0) + oy),
+                }));
+                const thickness = Math.max(1, Number(s.thickness || 2));
+
+                ctx.strokeStyle = `rgba(120,230,255,${0.18 + a * 0.34})`;
+                ctx.lineWidth = thickness + 2;
+                ctx.beginPath();
+                ctx.moveTo(main[0].x, main[0].y);
+                for (let i = 1; i < main.length; i++) {
+                    ctx.lineTo(main[i].x, main[i].y);
+                }
+                ctx.stroke();
+
+                ctx.strokeStyle = `rgba(255,255,210,${0.34 + a * 0.56})`;
+                ctx.lineWidth = Math.max(1, thickness * 0.6);
+                ctx.beginPath();
+                ctx.moveTo(main[0].x, main[0].y);
+                for (let i = 1; i < main.length; i++) {
+                    ctx.lineTo(main[i].x, main[i].y);
+                }
+                ctx.stroke();
+
+                const branches = Array.isArray(s.branches) ? s.branches : [];
+                if (branches.length > 0) {
+                    ctx.strokeStyle = `rgba(170,245,255,${0.22 + a * 0.42})`;
+                    ctx.lineWidth = Math.max(1, thickness * 0.55);
+                    for (const b of branches) {
+                        const bx0 = Math.round(Number(b?.x0 || 0));
+                        const by0 = Math.round(Number(b?.y0 || 0) + oy);
+                        const bx1 = Math.round(Number(b?.x1 || 0));
+                        const by1 = Math.round(Number(b?.y1 || 0) + oy);
+                        ctx.beginPath();
+                        ctx.moveTo(bx0, by0);
+                        ctx.lineTo(bx1, by1);
+                        ctx.stroke();
+                    }
+                }
+            } else {
+                // Backward-compatible fallback for older strike snapshots.
+                const x = Math.round(s.x || 0);
+                const y0 = Math.round((s.y0 || -10) + oy);
+                const y1 = Math.round((s.y1 || 0) + oy);
+                const midY = Math.round((y0 + y1) * 0.5);
+                const dx = ((x * 13 + midY * 3) % 5) - 2;
+
+                ctx.strokeStyle = `rgba(120,230,255,${0.2 + a * 0.3})`;
+                ctx.lineWidth = 6;
+                ctx.beginPath();
+                ctx.moveTo(x, y0);
+                ctx.lineTo(x + dx, midY);
+                ctx.lineTo(x - dx, y1);
+                ctx.stroke();
+
+                ctx.strokeStyle = `rgba(255,255,210,${0.45 + a * 0.5})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x, y0);
+                ctx.lineTo(x + dx, midY);
+                ctx.lineTo(x - dx, y1);
+                ctx.stroke();
+            }
+        }
+
+        const floodP = Math.max(0, Math.min(1, Number(game.floodVisualProgress || 0)));
+        if (floodP <= 0) return;
+        const playH = CANVAS_H - HUD_HEIGHT;
+        const h = Math.round(playH * floodP * 0.82);
+        const y = CANVAS_H - h;
+        const wave = (floodP * 12) % (Math.PI * 2);
+
+        const g = ctx.createLinearGradient(0, y, 0, CANVAS_H);
+        g.addColorStop(0, 'rgba(120,215,255,0.26)');
+        g.addColorStop(1, 'rgba(34,128,210,0.52)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, y, CANVAS_W, h);
+
+        ctx.strokeStyle = 'rgba(210,245,255,0.88)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = 0; x <= CANVAS_W; x += 6) {
+            const yy = y + Math.sin(x * 0.09 + wave) * 2;
+            if (x === 0) ctx.moveTo(x, yy);
+            else ctx.lineTo(x, yy);
+        }
+        ctx.stroke();
     }
 
     _drawPlayfieldBackground(ctx, game) {
@@ -480,8 +592,9 @@ export class Renderer {
         ctx.fillStyle = 'rgba(120,170,255,0.26)';
         ctx.fillRect(40, 107, CANVAS_W - 80, 1);
 
-        // ── Copyright ────────────────────────────────────────────────────────
-        drawTextCentered(ctx, '1986 TAITO  FAN REMAKE', CANVAS_W / 2, 112, 1, '#334455');
+        // ── Story short text ────────────────────────────────────────────────
+        drawTextCentered(ctx, 'STORY  BUB & BOB IN MONSTER CAVE', CANVAS_W / 2, 111, 1, '#4B638B');
+        drawTextCentered(ctx, 'LIGHTNING=SKY STRIKE   WATER=FLOOD', CANVAS_W / 2, 118, 1, '#3D5B84');
 
         const kb = game.input && game.input.describeBindings
             ? game.input.describeBindings()
@@ -501,7 +614,7 @@ export class Renderer {
 
         // ── Blinking start prompt ─────────────────────────────────────────────
         if (NO_FLICKER_MODE || (Math.floor(game.titleTimer / 22) % 2 === 0)) {
-            drawGlowText(ctx, `PRESS ${startLabel} TO START`, CANVAS_W / 2, 128, 1, '#55FF88', '#00AA44');
+            drawGlowText(ctx, `PRESS ${startLabel} TO START`, CANVAS_W / 2, 130, 1, '#55FF88', '#00AA44');
         }
 
         // ── Hi-score ─────────────────────────────────────────────────────────

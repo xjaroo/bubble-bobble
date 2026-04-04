@@ -1,8 +1,8 @@
 import {
-    TILE_SIZE, PLAY_W, PLAY_H,
+    TILE_SIZE, PLAY_W, PLAY_H, PLAY_ROWS,
     SCENE_TITLE, SCENE_PLAYING, SCENE_TRANSITION, SCENE_GAMEOVER,
     HURRY_FRAC, ANGRY_FRAC, BARON_FRAC,
-    SCORE_COMBO, ITEM_CANDY, ITEM_EXTEND, ITEM_RING, ITEM_GEM, ITEM_SHOE, ITEM_POTION, ITEM_UMBRELLA, ITEM_CAKE, ITEM_RAINBOW,
+    SCORE_COMBO, ITEM_CANDY, ITEM_EXTEND, ITEM_RING, ITEM_GEM, ITEM_SHOE, ITEM_POTION, ITEM_UMBRELLA, ITEM_CAKE, ITEM_RAINBOW, ITEM_LIGHTNING, ITEM_WATER,
     EXTRA_LIFE_SCORES,
 } from '../constants.js';
 import { CollisionMap } from './CollisionMap.js';
@@ -42,6 +42,12 @@ const RANDOM_GIANT_CAKE_ITEM_TICKS = 480;  // 8s to pick
 const RANDOM_RAINBOW_ICON_MIN_TICKS = 720;  // 12s
 const RANDOM_RAINBOW_ICON_MAX_TICKS = 1680; // 28s
 const RANDOM_RAINBOW_ICON_TICKS = 480;      // 8s to pick
+const RANDOM_LIGHTNING_ICON_MIN_TICKS = 760;  // 12.6s
+const RANDOM_LIGHTNING_ICON_MAX_TICKS = 1860; // 31s
+const RANDOM_LIGHTNING_ICON_TICKS = 520;
+const RANDOM_WATER_ICON_MIN_TICKS = 980;      // 16.3s
+const RANDOM_WATER_ICON_MAX_TICKS = 2240;     // 37.3s
+const RANDOM_WATER_ICON_TICKS = 540;
 const RAINBOW_RUSH_ITEM_TICKS = 3000;       // ~50s to clear full rainbow rush
 const ENEMY_BURST_WINDOW_TICKS = 48;   // kills within this window count as one burst
 const MAX_STAGE_ROUNDS = 100;
@@ -51,10 +57,23 @@ const ENEMY_TOP_DROP_MAX = 84;
 const ENEMY_SPAWN_GRACE_TICKS = 150;
 const ENEMY_START_SAFE_RADIUS = 56;
 const ENEMY_START_SAFE_SHIFT = 70;
+const PLAYER_RESPAWN_ENEMY_GRACE_TICKS = 180;
+const PLAYER_RESPAWN_CLEAR_RADIUS = 44;
+const PLAYER_RESPAWN_CLEAR_SHIFT = 68;
+const PLAYER_RESPAWN_RETARGET_COOLDOWN_TICKS = 270;
 const EXTEND_RAINBOW_TICKS = 300;
 const BOSS_STAGE_NUMBER = 100;
 const BOSS_TIMER_LIMIT = 100000;
 const BOSS_LIGHTNING_BUBBLE_LIFETIME = 240;
+const TITLE_RESTART_INPUT_LOCK_TICKS = 24;
+const LIGHTNING_STORM_TICKS = 320;
+const LIGHTNING_STRIKE_INTERVAL_MIN = 6;
+const LIGHTNING_STRIKE_INTERVAL_MAX = 12;
+const LIGHTNING_BURST_MIN = 2;
+const LIGHTNING_BURST_MAX = 3;
+const LIGHTNING_CHAIN_RADIUS = 34;
+const WATER_FLOOD_TICKS = 210;
+const FLOOD_LINE_KILL_MARGIN = 2;
 const DEFAULT_LEVEL_DIFFICULTY = Object.freeze({
     enemySpeedMul: 1.0,
     enemyAngrySpeedMul: 2.0,
@@ -162,6 +181,24 @@ export class Game {
         this.enemyBurstKills = 0;
         this.enemyBurstExpireAt = -1;
         this.enemyBurstOwner = 0;
+        this.titleInputLockTimer = 0;
+        this.lightningIconSpawnTimer = 0;
+        this.waterIconSpawnTimer = 0;
+        this.lightningStormTimer = 0;
+        this.lightningStormOwner = 0;
+        this.lightningStrikeCooldown = 0;
+        this.stormStrikes = [];
+        this.floodTimer = 0;
+        this.floodOwner = 0;
+        this.floodElapsed = 0;
+        this.floodTriggered = false;
+        this.floodVisualProgress = 0;
+    }
+
+    _returnToTitle(lockTicks = TITLE_RESTART_INPUT_LOCK_TICKS) {
+        this._reset();
+        this.titleInputLockTimer = Math.max(0, lockTicks | 0);
+        if (this.input && this.input.flush) this.input.flush();
     }
 
     setRemoteMirror(flag) {
@@ -231,6 +268,8 @@ export class Game {
         this.candySpawnTimer = randInt(RANDOM_CANDY_MIN_TICKS, RANDOM_CANDY_MAX_TICKS);
         this.randomCakeSpawnTimer = randInt(RANDOM_GIANT_CAKE_MIN_TICKS, RANDOM_GIANT_CAKE_MAX_TICKS);
         this.rainbowIconSpawnTimer = randInt(RANDOM_RAINBOW_ICON_MIN_TICKS, RANDOM_RAINBOW_ICON_MAX_TICKS);
+        this.lightningIconSpawnTimer = randInt(RANDOM_LIGHTNING_ICON_MIN_TICKS, RANDOM_LIGHTNING_ICON_MAX_TICKS);
+        this.waterIconSpawnTimer = randInt(RANDOM_WATER_ICON_MIN_TICKS, RANDOM_WATER_ICON_MAX_TICKS);
         this.rainbowRushActive = false;
         this.rainbowRushTotal = 0;
         this.rainbowRushCollected = [0, 0];
@@ -239,6 +278,15 @@ export class Game {
         this.enemyBurstKills = 0;
         this.enemyBurstExpireAt = -1;
         this.enemyBurstOwner = 0;
+        this.lightningStormTimer = 0;
+        this.lightningStormOwner = 0;
+        this.lightningStrikeCooldown = 0;
+        this.stormStrikes = [];
+        this.floodTimer = 0;
+        this.floodOwner = 0;
+        this.floodElapsed = 0;
+        this.floodTriggered = false;
+        this.floodVisualProgress = 0;
 
         const p1Data = data.p1Start;
         const p2Data = data.p2Start;
@@ -348,21 +396,83 @@ export class Game {
         return safeX;
     }
 
+    _isEnemySpawnClear(x, y, w, h) {
+        const probeXs = [x + 1, x + w * 0.5, x + w - 2];
+        const probeYs = [y + 1, y + h * 0.5, y + h - 2];
+        for (const py of probeYs) {
+            for (const px of probeXs) {
+                if (this.collisionMap.isSolidAt(px, py)) return false;
+            }
+        }
+
+        // Avoid immediate left/right pinches that cause enemies to wiggle in place.
+        const midY = y + h * 0.5;
+        const leftSolid = this.collisionMap.isSolidAt(x - 1, midY);
+        const rightSolid = this.collisionMap.isSolidAt(x + w + 1, midY);
+        if (leftSolid && rightSolid) return false;
+
+        return true;
+    }
+
+    _findOpenEnemySpawnSlot(preferredX, preferredRow, avoidXs, w, h) {
+        const baseX = this._safeEnemySpawnX(preferredX, avoidXs);
+        const minX = TILE_SIZE * 2;
+        const maxX = PLAY_W - TILE_SIZE * 3;
+        const baseRow = Math.max(2, Math.min(PLAY_ROWS - 2, preferredRow | 0));
+
+        const xCandidates = [baseX];
+        for (let step = 1; step <= 14; step++) {
+            xCandidates.push(Math.min(maxX, baseX + step * TILE_SIZE));
+            xCandidates.push(Math.max(minX, baseX - step * TILE_SIZE));
+        }
+
+        const rowCandidates = [baseRow];
+        for (let d = 1; d <= 4; d++) {
+            rowCandidates.push(Math.max(2, baseRow - d));
+            rowCandidates.push(Math.min(PLAY_ROWS - 2, baseRow + d));
+        }
+
+        for (const row of rowCandidates) {
+            const y = (row - 1) * TILE_SIZE;
+            for (const x of xCandidates) {
+                if (this._isEnemySpawnClear(x, y, w, h)) {
+                    return { x, row, y };
+                }
+            }
+        }
+
+        return { x: baseX, row: baseRow, y: (baseRow - 1) * TILE_SIZE };
+    }
+
     _spawnEnemy(data, difficulty = DEFAULT_LEVEL_DIFFICULTY, options = null) {
         const opts = options || {};
         const avoidXs = Array.isArray(opts.avoidXs) ? opts.avoidXs : [];
         const topDrop = !!opts.topDrop;
-        const x = this._safeEnemySpawnX(data.col * TILE_SIZE, avoidXs);
-        const y = topDrop
-            ? -randInt(ENEMY_TOP_DROP_MIN, ENEMY_TOP_DROP_MAX)
-            : (data.row - 1) * TILE_SIZE;
+        const preferredRow = data.row | 0;
+        const spawnSeedX = data.col * TILE_SIZE;
         let e;
         switch (data.type) {
-            case 'ZenChan': e = new ZenChan(x, y); break;
-            case 'Mighta':  e = new Mighta (x, y); break;
-            case 'Monsta':  e = new Monsta (x, y); break;
-            default:        e = new ZenChan(x, y);
+            case 'ZenChan': e = new ZenChan(0, 0); break;
+            case 'Mighta':  e = new Mighta (0, 0); break;
+            case 'Monsta':  e = new Monsta (0, 0); break;
+            default:        e = new ZenChan(0, 0);
         }
+
+        const slot = this._findOpenEnemySpawnSlot(
+            spawnSeedX,
+            preferredRow,
+            avoidXs,
+            e.size.w,
+            e.size.h
+        );
+        const y = topDrop
+            ? -randInt(ENEMY_TOP_DROP_MIN, ENEMY_TOP_DROP_MAX)
+            : slot.y;
+        e.pos.x = slot.x;
+        e.prevPos.x = slot.x;
+        e.pos.y = y;
+        e.prevPos.y = y;
+
         this._applyEnemyDifficulty(e, difficulty);
         if (topDrop) {
             e.introDrop = true;
@@ -380,6 +490,8 @@ export class Game {
         const angrySpeedMul = difficulty.enemyAngrySpeedMul ?? 2.0;
         const thinkMul = difficulty.enemyThinkMul ?? 1;
         enemy.speed *= speedMul;
+        // Very low speed + pixel snapping looks like enemies are stuck/jittering.
+        enemy.speed = Math.max(0.45, enemy.speed);
         enemy.angrySpeedMul = Math.max(1.1, angrySpeedMul);
 
         // Slow decision loops (jump/shoot) on easier levels.
@@ -501,10 +613,10 @@ export class Game {
         b.init(x, y, dir, ownerId, speedMul, options);
     }
 
-    spawnProjectile(x, y, dir) {
+    spawnProjectile(x, y, dir, options = null) {
         let p = this.projectiles.find(p => !p.active);
         if (!p) { p = new Projectile(); this.projectiles.push(p); }
-        p.init(x, y, dir);
+        p.init(x, y, dir, options);
     }
 
     spawnItem(x, y, type, extendIndex = 0, lifetimeLimit = undefined, foodKind = undefined) {
@@ -525,6 +637,26 @@ export class Game {
         const x = randInt(18, PLAY_W - 18);
         const y = randInt(-14, 40);
         this.spawnItem(x, y, ITEM_RAINBOW, 0, RANDOM_RAINBOW_ICON_TICKS);
+    }
+
+    _spawnRandomLightningIcon() {
+        if (this.scene !== SCENE_PLAYING) return;
+        if (this.levelClearing || this.isBossStage) return;
+        if (this.rainbowRushActive) return;
+        if (this._hasActiveItemType(ITEM_LIGHTNING)) return;
+        const x = randInt(18, PLAY_W - 18);
+        const y = randInt(-14, 40);
+        this.spawnItem(x, y, ITEM_LIGHTNING, 0, RANDOM_LIGHTNING_ICON_TICKS);
+    }
+
+    _spawnRandomWaterIcon() {
+        if (this.scene !== SCENE_PLAYING) return;
+        if (this.levelClearing || this.isBossStage) return;
+        if (this.rainbowRushActive) return;
+        if (this._hasActiveItemType(ITEM_WATER)) return;
+        const x = randInt(18, PLAY_W - 18);
+        const y = randInt(-14, 40);
+        this.spawnItem(x, y, ITEM_WATER, 0, RANDOM_WATER_ICON_TICKS);
     }
 
     _spawnRainbowRushItems() {
@@ -584,6 +716,141 @@ export class Game {
         }
     }
 
+    onLightningIconCollected(playerId = 0) {
+        this.lightningStormTimer = Math.max(this.lightningStormTimer, LIGHTNING_STORM_TICKS);
+        this.lightningStormOwner = playerId | 0;
+        this.lightningStrikeCooldown = 1;
+        this.lightningIconSpawnTimer = randInt(RANDOM_LIGHTNING_ICON_MIN_TICKS, RANDOM_LIGHTNING_ICON_MAX_TICKS);
+        this.sound.play('thunder');
+    }
+
+    onWaterIconCollected(playerId = 0) {
+        this.floodTimer = Math.max(this.floodTimer, WATER_FLOOD_TICKS);
+        this.floodOwner = playerId | 0;
+        this.floodElapsed = 0;
+        this.floodTriggered = true;
+        this.floodVisualProgress = 0;
+        this.waterIconSpawnTimer = randInt(RANDOM_WATER_ICON_MIN_TICKS, RANDOM_WATER_ICON_MAX_TICKS);
+        this.sound.play('flood');
+    }
+
+    _spawnSkyLightningStrike(playerId = 0) {
+        const live = this.enemies.filter(e => e && !e.dead && e.active && !e.trapped);
+        if (live.length === 0) return false;
+
+        const target = live[(Math.random() * live.length) | 0];
+        const strikeX = Math.round(target.pos.x + target.size.w * 0.5 + randInt(-6, 6));
+        const strikeY = Math.round(target.pos.y + target.size.h * 0.65);
+        const victims = [target];
+        const chainR2 = LIGHTNING_CHAIN_RADIUS * LIGHTNING_CHAIN_RADIUS;
+
+        const fromLeft = Math.random() < 0.5;
+        const x0 = fromLeft ? -randInt(12, 30) : (PLAY_W + randInt(12, 30));
+        const y0 = -randInt(10, 42);
+        const x1 = Math.round((x0 + strikeX) * 0.5 + randInt(-26, 26));
+        const y1 = Math.round(strikeY * 0.34 + randInt(-18, 10));
+        const x2 = Math.round((x1 + strikeX) * 0.5 + randInt(-18, 18));
+        const y2 = Math.round((y1 + strikeY) * 0.5 + randInt(-12, 12));
+
+        for (const e of live) {
+            if (e === target) continue;
+            const dx = (e.pos.x + e.size.w * 0.5) - strikeX;
+            const dy = (e.pos.y + e.size.h * 0.5) - strikeY;
+            if ((dx * dx + dy * dy) <= chainR2 && Math.random() < 0.55) victims.push(e);
+        }
+
+        for (const e of victims) {
+            this.onEnemyKilled(e, e.pos.x, e.pos.y, playerId | 0);
+        }
+
+        const branches = [];
+        if (Math.random() < 0.75) {
+            branches.push({
+                x0: x1,
+                y0: y1,
+                x1: Math.round(x1 + (fromLeft ? 1 : -1) * randInt(10, 24)),
+                y1: Math.round(y1 + randInt(10, 26)),
+            });
+        }
+        if (Math.random() < 0.6) {
+            branches.push({
+                x0: x2,
+                y0: y2,
+                x1: Math.round(x2 + (fromLeft ? 1 : -1) * randInt(8, 18)),
+                y1: Math.round(y2 + randInt(8, 20)),
+            });
+        }
+
+        this.stormStrikes.push({
+            points: [
+                { x: x0, y: y0 },
+                { x: x1, y: y1 },
+                { x: x2, y: y2 },
+                { x: strikeX, y: strikeY },
+            ],
+            branches,
+            timer: 11,
+            maxTimer: 11,
+            thickness: randInt(2, 4),
+        });
+        this.sound.play('thunder');
+        return true;
+    }
+
+    _triggerFloodKill(playerId = 0) {
+        const live = this.enemies.filter(e => e && !e.dead && (e.active || e.trapped));
+        if (live.length === 0) return false;
+        for (const e of live) {
+            this.onEnemyKilled(e, e.pos.x, e.pos.y, playerId | 0);
+        }
+        this.sound.play('flood');
+        return true;
+    }
+
+    _updateWeatherEffects() {
+        if (this.lightningStormTimer > 0) {
+            this.lightningStormTimer--;
+            this.lightningStrikeCooldown--;
+            if (this.lightningStrikeCooldown <= 0) {
+                const burst = randInt(LIGHTNING_BURST_MIN, LIGHTNING_BURST_MAX);
+                let hit = false;
+                for (let i = 0; i < burst; i++) {
+                    if (this._spawnSkyLightningStrike(this.lightningStormOwner | 0)) hit = true;
+                }
+                this.lightningStrikeCooldown = hit
+                    ? randInt(LIGHTNING_STRIKE_INTERVAL_MIN, LIGHTNING_STRIKE_INTERVAL_MAX)
+                    : 7;
+            }
+        }
+
+        for (const s of this.stormStrikes) {
+            s.timer = Math.max(0, (s.timer | 0) - 1);
+        }
+        this.stormStrikes = this.stormStrikes.filter(s => (s.timer | 0) > 0);
+
+        if (this.floodTimer > 0) {
+            this.floodTimer--;
+            this.floodElapsed++;
+            this.floodVisualProgress = Math.max(0, Math.min(1, this.floodElapsed / WATER_FLOOD_TICKS));
+            const waterLine = PLAY_H * (1 - this.floodVisualProgress);
+            for (const e of this.enemies) {
+                if (!e || e.dead || (!e.active && !e.trapped)) continue;
+                const enemyBottom = e.pos.y + e.size.h;
+                if (enemyBottom >= waterLine - FLOOD_LINE_KILL_MARGIN) {
+                    this.onEnemyKilled(e, e.pos.x, e.pos.y, this.floodOwner | 0);
+                }
+            }
+            if (this.floodVisualProgress >= 1 && this.floodTriggered) {
+                this.floodTriggered = false;
+                this._triggerFloodKill(this.floodOwner | 0);
+            }
+        } else {
+            this.floodElapsed = 0;
+            this.floodTriggered = false;
+            this.floodVisualProgress = 0;
+        }
+    }
+
     _completeRainbowRush() {
         if (!this.rainbowRushActive) return;
         this.rainbowRushActive = false;
@@ -612,23 +879,28 @@ export class Game {
         });
     }
 
-    onLightningBubbleBurst(playerId = 0, facing = 1) {
+    spawnBossLightningBolt(x, y, facing = 1, playerId = 0) {
+        const dir = facing >= 0 ? 1 : -1;
+        this.spawnProjectile(x, y, dir, {
+            mode: 'lightning',
+            ownerId: playerId | 0,
+            damage: 1,
+        });
+        this.sound.play('shoot');
+    }
+
+    onLightningBubbleBurst(playerId = 0, facing = 1, burstX = null, burstY = null) {
         if (!this.isBossStage) return false;
         const boss = this.bossEnemy;
         if (!boss || boss.dead) return false;
-        const hitterFacing = facing >= 0 ? 1 : -1;
-        if (typeof boss.takeLightningHit === 'function') {
-            const hit = boss.takeLightningHit(1, this, playerId, hitterFacing);
-            if (hit) {
-                this.scorePopups.push(new ScorePopup(
-                    boss.pos.x + boss.size.w * 0.5,
-                    boss.pos.y + boss.size.h * 0.3,
-                    1400
-                ));
-            }
-            return hit;
-        }
-        return false;
+        const bossCx = boss.pos.x + boss.size.w * 0.5;
+        const bx = Number.isFinite(burstX) ? burstX : bossCx;
+        const by = Number.isFinite(burstY) ? (burstY - 2) : (boss.pos.y + boss.size.h * 0.56);
+        let dir = facing >= 0 ? 1 : -1;
+        const towardBoss = bossCx >= bx ? 1 : -1;
+        if (dir !== towardBoss) dir = towardBoss;
+        this.spawnBossLightningBolt(bx, by, dir, playerId);
+        return true;
     }
 
     onBossDefeated(playerId = 0) {
@@ -707,6 +979,8 @@ export class Game {
         else if (roll < 0.59) this.spawnItem(x, y, ITEM_SHOE);
         else if (roll < 0.68) this.spawnItem(x, y, ITEM_POTION);
         else if (roll < 0.80) this.spawnItem(x, y, ITEM_GEM);
+        else if (roll < 0.86) this.spawnItem(x, y, ITEM_LIGHTNING);
+        else if (roll < 0.91) this.spawnItem(x, y, ITEM_WATER);
 
         // Bubble->food bonus should trigger only on the last enemy kill.
         const enemiesRemaining = this.enemies.some(e => !e.dead && (e.active || e.trapped));
@@ -856,6 +1130,18 @@ export class Game {
 
     onPlayerDeath(playerId) {
         this.lives[playerId]--;
+        const deadPlayer = this.players[playerId];
+        if (deadPlayer && deadPlayer.pos) {
+            const px = deadPlayer.pos.x + deadPlayer.size.w * 0.5;
+            for (const e of this.enemies) {
+                if (!e || e.dead || !e.active) continue;
+                const ex = e.pos.x + e.size.w * 0.5;
+                const pushDir = ex >= px ? 1 : -1;
+                e.dir = pushDir;
+                e.vel.x = pushDir * Math.max(0.3, (e.speed || 0.6) * 0.65);
+                e.retargetCooldown = Math.max(e.retargetCooldown || 0, Math.floor(PLAYER_RESPAWN_RETARGET_COOLDOWN_TICKS * 0.7));
+            }
+        }
         if (this.lives[playerId] < 0) {
             // Check if all players are out
             const allOut = this.players.every(p => p.dead && this.lives[p.id] < 0);
@@ -866,6 +1152,44 @@ export class Game {
                 this.gameOverNeedsNameEntry = this.gameOverFinalScore > 0;
                 this.gameOverEntryRequested = false;
             }
+        }
+    }
+
+    onPlayerRespawn(player) {
+        if (!player || player.dead) return;
+        const px = player.pos.x + player.size.w * 0.5;
+        const py = player.pos.y + player.size.h * 0.5;
+        const safeR2 = PLAYER_RESPAWN_CLEAR_RADIUS * PLAYER_RESPAWN_CLEAR_RADIUS;
+
+        for (const e of this.enemies) {
+            if (!e || e.dead || !e.active) continue;
+            e.spawnGrace = Math.max(e.spawnGrace || 0, PLAYER_RESPAWN_ENEMY_GRACE_TICKS);
+            e.retargetCooldown = Math.max(e.retargetCooldown || 0, PLAYER_RESPAWN_RETARGET_COOLDOWN_TICKS);
+
+            const ex = e.pos.x + e.size.w * 0.5;
+            const ey = e.pos.y + e.size.h * 0.5;
+            const dx = ex - px;
+            const dy = ey - py;
+            if ((dx * dx + dy * dy) > safeR2) continue;
+
+            const pushDir = dx >= 0 ? 1 : -1;
+            const targetX = px + pushDir * PLAYER_RESPAWN_CLEAR_SHIFT;
+            const minX = TILE_SIZE * 2;
+            const maxX = PLAY_W - e.size.w - TILE_SIZE * 2;
+            e.pos.x = Math.max(minX, Math.min(maxX, targetX));
+            e.pos.y = Math.max(0, e.pos.y - 6);
+            e.prevPos.x = e.pos.x;
+            e.prevPos.y = e.pos.y;
+            e.vel.x = pushDir * Math.max(0.35, (e.speed || 0.6) * 0.7);
+            e.vel.y = 0;
+            e.introDrop = false;
+        }
+
+        if (this.baron && this.baron.active) {
+            this.baron.pos.x = Math.max(4, Math.min(PLAY_W - this.baron.size.w - 4, px + (px < PLAY_W * 0.5 ? 90 : -90)));
+            this.baron.pos.y = Math.max(8, this.baron.pos.y - 10);
+            this.baron.prevPos.x = this.baron.pos.x;
+            this.baron.prevPos.y = this.baron.pos.y;
         }
     }
 
@@ -891,7 +1215,7 @@ export class Game {
             this.highScoreName = topName.trim();
             localStorage.setItem('bbHighScoreName', this.highScoreName);
         }
-        this._reset();
+        this._returnToTitle();
     }
 
     // ── Main update ──────────────────────────────────────────────────────────
@@ -929,6 +1253,10 @@ export class Game {
         for (const b of this._titleBubbles) {
             b.y -= 0.3;
             if (b.y < -14) b.y = PLAY_H + 10;
+        }
+        if (this.titleInputLockTimer > 0) {
+            this.titleInputLockTimer--;
+            return;
         }
         if (this.networkStartLock) return;
         if (this.input.anyStart()) {
@@ -992,6 +1320,22 @@ export class Game {
                 this.rainbowIconSpawnTimer = randInt(RANDOM_RAINBOW_ICON_MIN_TICKS, RANDOM_RAINBOW_ICON_MAX_TICKS);
             }
         }
+        if (!this.isBossStage && !this.levelClearing && !this.rainbowRushActive && this.enemies.length > 0) {
+            this.lightningIconSpawnTimer--;
+            if (this.lightningIconSpawnTimer <= 0) {
+                this._spawnRandomLightningIcon();
+                this.lightningIconSpawnTimer = randInt(RANDOM_LIGHTNING_ICON_MIN_TICKS, RANDOM_LIGHTNING_ICON_MAX_TICKS);
+            }
+        }
+        if (!this.isBossStage && !this.levelClearing && !this.rainbowRushActive && this.enemies.length > 0) {
+            this.waterIconSpawnTimer--;
+            if (this.waterIconSpawnTimer <= 0) {
+                this._spawnRandomWaterIcon();
+                this.waterIconSpawnTimer = randInt(RANDOM_WATER_ICON_MIN_TICKS, RANDOM_WATER_ICON_MAX_TICKS);
+            }
+        }
+
+        this._updateWeatherEffects();
 
         if (this.levelTimer >= limitTicks * angryFrac) {
             for (const e of this.enemies) e.setAngry();
@@ -1116,6 +1460,13 @@ export class Game {
         this.sound.play('levelclear');
         // Transition starts only after items are gone; clear leftover bubbles.
         for (const b of this.bubbles) b.active = false;
+        this.lightningStormTimer = 0;
+        this.lightningStrikeCooldown = 0;
+        this.stormStrikes = [];
+        this.floodTimer = 0;
+        this.floodElapsed = 0;
+        this.floodTriggered = false;
+        this.floodVisualProgress = 0;
     }
 
     _updateTransition() {
@@ -1160,7 +1511,7 @@ export class Game {
         if (this.gameOverNeedsNameEntry) return;
         this.gameOverTimer--;
         if (this.gameOverTimer <= 0 || this.input.anyStart()) {
-            this._reset();
+            this._returnToTitle();
         }
     }
 
@@ -1213,11 +1564,35 @@ export class Game {
             bubbleFoodRushTimer: this.bubbleFoodRushTimer,
             randomCakeSpawnTimer: this.randomCakeSpawnTimer,
             rainbowIconSpawnTimer: this.rainbowIconSpawnTimer,
+            lightningIconSpawnTimer: this.lightningIconSpawnTimer,
+            waterIconSpawnTimer: this.waterIconSpawnTimer,
             rainbowRushActive: !!this.rainbowRushActive,
             rainbowRushTotal: this.rainbowRushTotal,
             rainbowRushCollected: [...this.rainbowRushCollected],
             rainbowRushResultTimer: this.rainbowRushResultTimer,
             rainbowRushWinner: this.rainbowRushWinner,
+            lightningStormTimer: this.lightningStormTimer,
+            lightningStormOwner: this.lightningStormOwner,
+            lightningStrikeCooldown: this.lightningStrikeCooldown,
+            stormStrikes: this.stormStrikes.map(s => ({
+                points: Array.isArray(s.points)
+                    ? s.points.map(p => ({ x: p.x, y: p.y }))
+                    : [],
+                branches: Array.isArray(s.branches)
+                    ? s.branches.map(b => ({ x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 }))
+                    : [],
+                thickness: s.thickness || 2,
+                x: s.x,
+                y0: s.y0,
+                y1: s.y1,
+                timer: s.timer,
+                maxTimer: s.maxTimer,
+            })),
+            floodTimer: this.floodTimer,
+            floodOwner: this.floodOwner,
+            floodElapsed: this.floodElapsed,
+            floodTriggered: !!this.floodTriggered,
+            floodVisualProgress: this.floodVisualProgress,
             levelClearing: !!this.levelClearing,
             isBossStage: !!this.isBossStage,
             gameClear: !!this.gameClear,
@@ -1297,6 +1672,9 @@ export class Game {
             projectiles: this.projectiles.map(p => ({
                 ...this._serializeEntityBase(p),
                 lifetime: p.lifetime || 0,
+                mode: p.mode || 'enemy',
+                ownerId: p.ownerId || 0,
+                damage: p.damage || 1,
             })),
             scorePopups: this.scorePopups.map(sp => ({
                 x: sp.x,
@@ -1374,6 +1752,12 @@ export class Game {
         this.rainbowIconSpawnTimer = Number.isFinite(snapshot.rainbowIconSpawnTimer)
             ? snapshot.rainbowIconSpawnTimer
             : this.rainbowIconSpawnTimer;
+        this.lightningIconSpawnTimer = Number.isFinite(snapshot.lightningIconSpawnTimer)
+            ? snapshot.lightningIconSpawnTimer
+            : this.lightningIconSpawnTimer;
+        this.waterIconSpawnTimer = Number.isFinite(snapshot.waterIconSpawnTimer)
+            ? snapshot.waterIconSpawnTimer
+            : this.waterIconSpawnTimer;
         this.rainbowRushActive = !!snapshot.rainbowRushActive;
         this.rainbowRushTotal = Number.isFinite(snapshot.rainbowRushTotal) ? snapshot.rainbowRushTotal : 0;
         this.rainbowRushCollected = Array.isArray(snapshot.rainbowRushCollected)
@@ -1385,6 +1769,46 @@ export class Game {
         this.rainbowRushWinner = typeof snapshot.rainbowRushWinner === 'string'
             ? snapshot.rainbowRushWinner
             : '';
+        this.lightningStormTimer = Number.isFinite(snapshot.lightningStormTimer)
+            ? snapshot.lightningStormTimer
+            : 0;
+        this.lightningStormOwner = Number.isFinite(snapshot.lightningStormOwner)
+            ? (snapshot.lightningStormOwner | 0)
+            : 0;
+        this.lightningStrikeCooldown = Number.isFinite(snapshot.lightningStrikeCooldown)
+            ? snapshot.lightningStrikeCooldown
+            : 0;
+        this.stormStrikes = Array.isArray(snapshot.stormStrikes)
+            ? snapshot.stormStrikes.map(s => ({
+                points: Array.isArray(s.points)
+                    ? s.points.map(p => ({
+                        x: Number(p?.x || 0),
+                        y: Number(p?.y || 0),
+                    }))
+                    : [],
+                branches: Array.isArray(s.branches)
+                    ? s.branches.map(b => ({
+                        x0: Number(b?.x0 || 0),
+                        y0: Number(b?.y0 || 0),
+                        x1: Number(b?.x1 || 0),
+                        y1: Number(b?.y1 || 0),
+                    }))
+                    : [],
+                thickness: Number(s.thickness || 2),
+                x: Number(s.x || 0),
+                y0: Number(s.y0 || 0),
+                y1: Number(s.y1 || 0),
+                timer: Number(s.timer || 0),
+                maxTimer: Number(s.maxTimer || 0),
+            }))
+            : [];
+        this.floodTimer = Number.isFinite(snapshot.floodTimer) ? snapshot.floodTimer : 0;
+        this.floodOwner = Number.isFinite(snapshot.floodOwner) ? (snapshot.floodOwner | 0) : 0;
+        this.floodElapsed = Number.isFinite(snapshot.floodElapsed) ? snapshot.floodElapsed : 0;
+        this.floodTriggered = !!snapshot.floodTriggered;
+        this.floodVisualProgress = Number.isFinite(snapshot.floodVisualProgress)
+            ? snapshot.floodVisualProgress
+            : 0;
         this.levelClearing = !!snapshot.levelClearing;
         this.isBossStage = !!snapshot.isBossStage;
         this.gameClear = !!snapshot.gameClear;
@@ -1490,6 +1914,9 @@ export class Game {
         this.projectiles = (Array.isArray(snapshot.projectiles) ? snapshot.projectiles : []).map(p => {
             const rp = this._toRenderableEntity(p, { sizeW: 6, sizeH: 6 });
             rp.lifetime = Number.isFinite(p.lifetime) ? p.lifetime : 0;
+            rp.mode = typeof p.mode === 'string' ? p.mode : 'enemy';
+            rp.ownerId = Number.isFinite(p.ownerId) ? (p.ownerId | 0) : 0;
+            rp.damage = Number.isFinite(p.damage) ? Math.max(1, p.damage | 0) : 1;
             return rp;
         });
 

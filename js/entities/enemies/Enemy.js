@@ -22,7 +22,10 @@ export class Enemy extends Entity {
         this.angrySpeedMul = 2.2;
         this._groundLockY  = Math.round(y);
         this.spawnGrace    = 0;
+        this.retargetCooldown = 0;
         this.introDrop     = false;
+        this._stuckTicks   = 0;
+        this._unstuckCooldown = 0;
     }
 
     setAngry() {
@@ -37,6 +40,8 @@ export class Enemy extends Entity {
         this.savePrev();
 
         if (this.spawnGrace > 0) this.spawnGrace--;
+        if (this.retargetCooldown > 0) this.retargetCooldown--;
+        if (this._unstuckCooldown > 0) this._unstuckCooldown--;
 
         // AI logic (overridden by subclasses).
         // During intro drop, enemies only fall from the top.
@@ -80,6 +85,7 @@ export class Enemy extends Entity {
 
         // Resolve X
         const dx = game.collisionMap.sweepX(this, this.vel.x);
+        const hitWall = dx !== this.vel.x;
         if (dx !== this.vel.x) {
             this.dir *= -1;
             this.vel.x = this.dir * this.speed;
@@ -98,6 +104,32 @@ export class Enemy extends Entity {
             this.vel.x = 0;
             this.pos.x = Math.round(this.pos.x);
             this.prevPos.x = this.pos.x;
+        }
+
+        // Escape logic for ledge/wall traps where enemies keep wiggling in place.
+        if (this.onGround && !this.introDrop && !this.trapped) {
+            const movedX = Math.abs(this.pos.x - this.prevPos.x);
+            const tryingMove = Math.abs(this.vel.x) > 0.05;
+            if (tryingMove && movedX < 0.05) {
+                this._stuckTicks += hitWall ? 3 : 1;
+            } else {
+                this._stuckTicks = 0;
+            }
+
+            if (this._stuckTicks > 26 && this._unstuckCooldown <= 0) {
+                this.dir *= -1;
+                this.vel.x = this.dir * this.speed;
+                // Small hop + horizontal nudge to get out of narrow traps.
+                if (Math.abs(this.vel.y) < 0.01) this.vel.y = -3.8;
+                const nudge = game.collisionMap.sweepX(this, this.dir * 2);
+                this.pos.x += nudge;
+                this.prevPos.x = this.pos.x;
+                this._stuckTicks = 0;
+                this._unstuckCooldown = 36;
+                this.retargetCooldown = Math.max(this.retargetCooldown || 0, 30);
+            }
+        } else {
+            this._stuckTicks = 0;
         }
 
         if (STATIC_CHARACTER_VISUALS) {

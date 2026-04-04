@@ -2,6 +2,11 @@
   "version": 1,
   "scores": [
     {
+      "name": "PLAYER",
+      "score": 792500,
+      "createdAt": "2026-04-04T05:20:20.305Z"
+    },
+    {
       "name": "min",
       "score": 178100,
       "createdAt": "2026-04-04T01:46:56.734Z"
@@ -15,6 +20,11 @@
       "name": "xxxx",
       "score": 28400,
       "createdAt": "2026-04-03T12:39:52.868Z"
+    },
+    {
+      "name": "ㅋㅋㅌ",
+      "score": 26800,
+      "createdAt": "2026-04-04T13:20:55.652Z"
     },
     {
       "name": "PLAYER",

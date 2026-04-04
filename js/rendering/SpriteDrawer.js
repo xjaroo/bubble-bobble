@@ -823,6 +823,8 @@ const ITEM_COLORS = {
     umbrella: ['#4EC7FF', '#D9F7FF'],
     cake: ['#FF8FB0', '#FFE8F0'],
     rainbow: ['#6DE9FF', '#FFE7A5'],
+    lightning: ['#7FD8FF', '#F1FEFF'],
+    water: ['#3CA7FF', '#C9F0FF'],
 };
 
 const EXTEND_CHARS = 'EXTEND';
@@ -1036,6 +1038,72 @@ export function drawItem(ctx, x, y, type, extendIndex, foodKind = 'strawberry') 
         ctx.fill();
         roundedRect(ctx, px + 7.5, py + 7.0, 1.4, 1.2, 0.4);
         ctx.fill();
+        return;
+    }
+
+    if (type === 'lightning') {
+        circleGlow(ctx, px + 6, py + 6, 4.5, '#8EE9FF', 9, 0.2);
+        const bg = ctx.createLinearGradient(0, py, 0, py + 12);
+        bg.addColorStop(0, '#EEF9FF');
+        bg.addColorStop(1, '#B7E9FF');
+        ctx.fillStyle = bg;
+        roundedRect(ctx, px + 0.5, py + 0.5, 11, 11, 2.4);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(35,90,135,0.85)';
+        ctx.lineWidth = 0.9;
+        roundedRect(ctx, px + 0.5, py + 0.5, 11, 11, 2.4);
+        ctx.stroke();
+
+        ctx.fillStyle = '#FFF9A8';
+        ctx.beginPath();
+        ctx.moveTo(px + 6.2, py + 1.6);
+        ctx.lineTo(px + 3.9, py + 6.2);
+        ctx.lineTo(px + 6.0, py + 6.2);
+        ctx.lineTo(px + 4.6, py + 10.2);
+        ctx.lineTo(px + 8.5, py + 5.0);
+        ctx.lineTo(px + 6.5, py + 5.0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(150,115,30,0.7)';
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
+        return;
+    }
+
+    if (type === 'water') {
+        circleGlow(ctx, px + 6, py + 6, 4.5, '#69CCFF', 9, 0.2);
+        const bg = ctx.createLinearGradient(0, py, 0, py + 12);
+        bg.addColorStop(0, '#ECFAFF');
+        bg.addColorStop(1, '#A7DBFF');
+        ctx.fillStyle = bg;
+        roundedRect(ctx, px + 0.5, py + 0.5, 11, 11, 2.4);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(25,86,140,0.85)';
+        ctx.lineWidth = 0.9;
+        roundedRect(ctx, px + 0.5, py + 0.5, 11, 11, 2.4);
+        ctx.stroke();
+
+        const wg = ctx.createLinearGradient(0, py + 2.4, 0, py + 10.4);
+        wg.addColorStop(0, '#88D7FF');
+        wg.addColorStop(1, '#2F98F0');
+        ctx.fillStyle = wg;
+        ctx.beginPath();
+        ctx.moveTo(px + 2.0, py + 4.8);
+        ctx.quadraticCurveTo(px + 3.8, py + 3.4, px + 5.1, py + 4.8);
+        ctx.quadraticCurveTo(px + 6.4, py + 6.3, px + 7.7, py + 4.8);
+        ctx.quadraticCurveTo(px + 9.1, py + 3.4, px + 10.0, py + 4.8);
+        ctx.lineTo(px + 10.0, py + 9.7);
+        ctx.lineTo(px + 2.0, py + 9.7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(180,235,255,0.95)';
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(px + 2.1, py + 4.7);
+        ctx.quadraticCurveTo(px + 3.8, py + 3.7, px + 5.1, py + 4.7);
+        ctx.quadraticCurveTo(px + 6.4, py + 5.9, px + 7.7, py + 4.7);
+        ctx.quadraticCurveTo(px + 9.1, py + 3.7, px + 10.0, py + 4.7);
+        ctx.stroke();
         return;
     }
 
