@@ -3,9 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node serve.mjs"
+    "start": "node serve.mjs",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop bubble-bobble",
+    "pm2:restart": "pm2 restart bubble-bobble",
+    "pm2:delete": "pm2 delete bubble-bobble"
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "pm2": "^6.0.14"
   }
 }
