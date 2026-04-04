@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bubble Bobble</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@600;700&family=Press+Start+2P&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+    </div>
+    <div id="start-overlay" aria-hidden="false">
+        <div id="start-modal" role="dialog" aria-modal="true" aria-labelledby="start-title">
+            <section id="start-mode-view">
+                <h1 id="start-title">Bubble Bobble</h1>
+                <p class="start-help">Choose how you want to play.</p>
+                <div class="start-mode-actions">
+                    <button id="start-single-btn" type="button">Single Game</button>
+                    <button id="start-network-btn" type="button">Network Game</button>
+                </div>
+            </section>
+            <section id="start-network-view" class="hidden">
+                <h2>Network Lobby</h2>
+                <p class="start-help">Enter your name, wait as host, or join someone who is waiting.</p>
+                <div class="start-net-row">
+                    <label for="start-net-name">Name</label>
+                    <input id="start-net-name" type="text" maxlength="16" autocomplete="off" />
+                </div>
+                <div class="start-net-actions">
+                    <button id="start-net-host" type="button">Wait For Player</button>
+                    <button id="start-net-refresh" type="button">Refresh List</button>
+                    <button id="start-net-cancel" type="button">Cancel Waiting</button>
+                    <button id="start-net-back" type="button">Back</button>
+                </div>
+                <p id="start-net-status" class="start-help">Not connected.</p>
+                <ul id="start-net-room-list" class="start-room-list"></ul>
+            </section>
+        </div>
+    </div>
+    <div id="touch-controls" class="hidden" aria-hidden="true">
+        <div class="touch-pad" aria-label="Directional Pad">
+            <button class="touch-btn touch-dir up" data-touch-action="jump" type="button" aria-label="Jump Up">▲</button>
+            <button class="touch-btn touch-dir left" data-touch-action="left" type="button" aria-label="Move Left">◀</button>
+            <button class="touch-btn touch-dir right" data-touch-action="right" type="button" aria-label="Move Right">▶</button>
+            <button class="touch-btn touch-dir down" data-touch-action="down" type="button" aria-label="Move Down">▼</button>
+        </div>
+        <div class="touch-actions" aria-label="Action Buttons">
+            <button class="touch-btn touch-action shoot" data-touch-action="shoot" type="button" aria-label="Shoot Bubble">BUBBLE</button>
+            <button class="touch-btn touch-action jump" data-touch-action="jump" type="button" aria-label="Jump">JUMP</button>
+            <button class="touch-btn touch-action start" data-touch-action="start" type="button" aria-label="Start">START</button>
+        </div>
+    </div>
+    <div id="controls">
+        <div id="controls-lines">
+            <span id="controls-p1"></span>
+            <span id="controls-p2"></span>
+            <span id="controls-system"></span>
+            <span id="controls-net"></span>
+            <span id="visual-mode"></span>
+        </div>
+        <button id="open-settings" type="button">SETTINGS</button>
+    </div>
+    <div id="settings-overlay" class="hidden" aria-hidden="true">
+        <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+            <h2 id="settings-title">Game Settings</h2>
+
+            <section class="settings-group">
+                <h3>Start Mode</h3>
+                <label class="radio-row">
+                    <input type="radio" name="start-players" value="1">
+                    1 Player Start
+                </label>
+                <label class="radio-row">
+                    <input type="radio" name="start-players" value="2">
+                    2 Player Start
+                </label>
+            </section>
+
+            <section class="settings-group">
+                <h3>Keyboard Keys</h3>
+                <p class="settings-help">Click a key button, then press a new key. ESC cancels.</p>
+                <div id="keybind-list"></div>
+            </section>
+
+            <section class="settings-group">
+                <h3>Online Co-op (WebSocket)</h3>
+                <p class="settings-help">Create or join a 4-digit room, set your name, then both players press Ready to start together.</p>
+                <div class="net-actions">
+                    <button id="net-host" type="button">Create Room</button>
+                    <input id="net-room-code" type="text" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="1234" autocomplete="off" />
+                    <button id="net-join" type="button">Join Room</button>
+                    <button id="net-leave" type="button">Leave Room</button>
+                </div>
+                <div class="net-lobby">
+                    <input id="net-player-name" type="text" maxlength="16" placeholder="Your name" autocomplete="off" />
+                    <button id="net-ready" type="button">Ready</button>
+                </div>
+                <p id="net-room-label" class="settings-help">Room: -</p>
+                <p id="net-lobby-label" class="settings-help">Host: - | Guest: -</p>
+                <p id="net-status" class="settings-help">Mode: Local</p>
+            </section>
+
+            <div class="settings-actions">
+                <button id="reset-bindings" type="button">Reset Defaults</button>
+                <button id="close-settings" type="button">Close</button>
+            </div>
+        </div>
+    </div>
+    <div id="score-overlay" class="hidden" aria-hidden="true">
+        <div id="score-modal" role="dialog" aria-modal="true" aria-labelledby="score-title">
+            <h2 id="score-title">New High Score</h2>
+            <p id="score-message">Game Over! Enter your name.</p>
+            <div class="score-row">
+                <label for="score-name">Name</label>
+                <input id="score-name" type="text" maxlength="16" autocomplete="off" />
+            </div>
+            <div id="score-status" class="settings-help"></div>
+            <div class="settings-group">
+                <h3>Top Scores</h3>
+                <ol id="score-top-list"></ol>
+            </div>
+            <div class="settings-actions">
+                <button id="score-save" type="button">Save Score</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        // Register dev service worker so JS/CSS changes always load fresh
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').then(reg => {
+                if (reg.waiting) reg.waiting.postMessage('skipWaiting');
+                reg.addEventListener('updatefound', () => {
+                    reg.installing.addEventListener('statechange', e => {
+                        if (e.target.state === 'activated') location.reload();
+                    });
+                });
+            });
+        }
+    </script>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
