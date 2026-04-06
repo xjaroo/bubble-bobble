@@ -42,3 +42,5 @@ venv/
 .cache/
 
 .pnpm-store/
+
+data/highscores.json
